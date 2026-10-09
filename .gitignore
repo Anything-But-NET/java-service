@@ -1,0 +1,57 @@
+# Gradle
+.gradle/
+build/
+# Дозволяємо зберегти Gradle Wrapper, щоб інші могли зібрати проект без встановленого Gradle
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Java / Kotlin / Скомпільовані класи
+*.class
+*.kt.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+
+# Spring Boot
+.sts4-cache/
+
+# Логи
+*.log
+logs/
+# Краші JVM
+hs_err_pid*
+replay_pid*
+
+# IntelliJ IDEA (найпопулярніша IDE для Kotlin/Spring)
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Eclipse (якщо хтось із команди використовує)
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.extLibs
+bin/
+
+# Visual Studio Code
+.vscode/
+
+# Конфігурації середовища (щоб не злити паролі до БД)
+.env
+.env.*
+application-local.yml
+application-local.properties
+
+# OS files
+.DS_Store
+Thumbs.db
