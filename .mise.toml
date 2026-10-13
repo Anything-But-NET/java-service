@@ -1,0 +1,6 @@
+[tools]
+java = "temurin-25"
+
+[tasks.start]
+description = "run Spring Boot"
+run = "./gradlew bootRun"
