@@ -1,3 +1,7 @@
 spring:
   application:
-    name: demo
+    name: copilot
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/${DB_NAME:copilot_db}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:example}
