@@ -5,11 +5,21 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:5432/${DB_NAME:copilot_db}
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:example}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
   kafka:
     bootstrap-servers: ${KAFKA_BROKER:localhost:9092}
     consumer:
       group-id: java-metadata-group
       auto-offset-reset: earliest
       enable-auto-commit: false
-    listener:
-      ack-mode: manual
+
+app:
+  kafka:
+    topics:
+      ingestion: ${KAFKA_INGESTION_TOPIC:rag.documents.ingestion.v1}

@@ -1,72 +1,58 @@
 package com.anything_but_dotnet.copilot.service;
 
-import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
-import com.anything_but_dotnet.copilot.repository.DocumentMetadataRepository;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.anything_but_dotnet.copilot.dto.SyncEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Optional;
 
 @Service
 public class DocumentSyncConsumer {
 
-    private final DocumentMetadataRepository repository;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private static final Logger log = LoggerFactory.getLogger(DocumentSyncConsumer.class);
 
-    public DocumentSyncConsumer(DocumentMetadataRepository repository) {
-        this.repository = repository;
+    private final DocumentMetadataService metadataService;
+    private final ObjectMapper objectMapper;
+
+    public DocumentSyncConsumer(DocumentMetadataService metadataService, ObjectMapper objectMapper) {
+        this.metadataService = metadataService;
+        this.objectMapper = objectMapper;
     }
 
-    @KafkaListener(topics = "new-file-data", groupId = "java-metadata-group")
-    @Transactional
-    public void consume(ConsumerRecord<String, String> record, Acknowledgment ack) {
+    @KafkaListener(topics = "${app.kafka.topics.ingestion:rag.documents.ingestion.v1}")
+    public void consume(ConsumerRecord<String, String> record) {
+        if (record.value() == null) {
+            log.warn("Received null record (key={} topic={}, partition={}, offset={})",
+                    record.key(), record.topic(), record.partition(), record.offset());
+            return;
+        }
+
+        parseEvent(record).ifPresent(metadataService::processEvent);
+    }
+
+    private Optional<SyncEvent> parseEvent(ConsumerRecord<String, String> record) {
         try {
-            if (record.value() == null) {
-                if (record.key() != null) {
-                    String docId = record.key().replace("\"", "");
-                    repository.deleteById(docId);
-                }
-                ack.acknowledge();
-                return;
+            SyncEvent event = objectMapper.readValue(record.value(), SyncEvent.class);
+
+            if (event == null || event.documentId() == null || event.documentId().isBlank()) {
+                log.warn(
+                        "Skipping ingestion event with missing document_id (topic={}, partition={}, offset={})",
+                        record.topic(), record.partition(), record.offset()
+                );
+                return Optional.empty();
             }
-
-            JsonNode rootNode = objectMapper.readTree(record.value());
-            JsonNode payload = rootNode.has("message") ? rootNode.get("message") : rootNode;
-            
-            if (!payload.has("document_id")) {
-                ack.acknowledge();
-                return;
-            }
-
-            String docId = payload.get("document_id").asText();
-            
-            if (payload.path("is_deleted").asBoolean(false)) {
-                repository.deleteById(docId);
-                ack.acknowledge();
-                return;
-            }
-
-            List<String> roles = new ArrayList<>();
-            if (payload.has("acl") && payload.get("acl").has("allowed_groups")) {
-                payload.get("acl").get("allowed_groups").forEach(node -> roles.add(node.asText()));
-            }
-
-            DocumentMetadata doc = repository.findById(docId).orElse(new DocumentMetadata());
-            doc.setDocId(docId);
-            doc.setAllowedRoles(roles);
-            doc.setLastSyncAt(Instant.now());
-            repository.save(doc);
-
-            ack.acknowledge();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+            return Optional.of(event);
+        } catch (JsonProcessingException e) {
+            log.error(
+                    "Invalid ingestion payload (topic={}, partition={}, offset={}): {}",
+                    record.topic(), record.partition(), record.offset(), e.getMessage()
+            );
+            return Optional.empty();
         }
     }
 }
