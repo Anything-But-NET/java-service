@@ -23,6 +23,7 @@ class SyncEventTest {
     void shouldDeserializeUpsertEvent(String action) throws Exception {
         String json = """
                 {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                   "document_id": "doc-456",
                   "action": "%s",
                   "source_system": "sharepoint",
@@ -52,6 +53,7 @@ class SyncEventTest {
     void shouldDeserializeUpdateAclEvent() throws Exception {
         String json = """
                 {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                   "document_id": "doc-456",
                   "action": "update_acl",
                   "acl": {
@@ -71,6 +73,7 @@ class SyncEventTest {
     void shouldDeserializeDeleteEvent() throws Exception {
         String json = """
                 {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                   "document_id": "doc-456",
                   "action": "delete"
                 }
@@ -86,6 +89,7 @@ class SyncEventTest {
     void shouldRejectUnknownAction() {
         String json = """
                 {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                   "document_id": "doc-456",
                   "action": "unknown_action"
                 }

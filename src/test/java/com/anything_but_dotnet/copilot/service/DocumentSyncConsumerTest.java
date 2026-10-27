@@ -37,6 +37,7 @@ class DocumentSyncConsumerTest {
     void shouldParseAndForwardValidUpsertRecord() {
         String payload = """
                 {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                   "document_id": "doc-456",
                   "action": "create",
                   "source_system": "sharepoint",
@@ -63,6 +64,7 @@ class DocumentSyncConsumerTest {
     void shouldParseAndForwardValidDeleteRecord() {
         String payload = """
                 {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                   "document_id": "doc-456",
                   "action": "delete"
                 }
@@ -91,6 +93,7 @@ class DocumentSyncConsumerTest {
     void shouldSkipEventWithMissingDocumentId() {
         String payload = """
                 {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                   "action": "delete"
                 }
                 """;
@@ -105,6 +108,7 @@ class DocumentSyncConsumerTest {
     void shouldSkipMalformedJsonAndUnknownAction() {
         String invalidActionPayload = """
                 {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                   "document_id": "doc-456",
                   "action": "unknown_action"
                 }

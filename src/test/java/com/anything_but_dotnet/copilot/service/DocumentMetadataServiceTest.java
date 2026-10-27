@@ -42,6 +42,7 @@ class DocumentMetadataServiceTest {
     void shouldCreateNewDocumentOnUpsertEvent() {
         Instant eventUpdated = Instant.parse("2026-10-26T16:00:00Z");
         SyncEvent.Upsert event = new SyncEvent.Upsert(
+                "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                 "doc-456",
                 "create",
                 "sharepoint",
@@ -84,6 +85,7 @@ class DocumentMetadataServiceTest {
         when(repository.findById("doc-456")).thenReturn(Optional.of(existing));
 
         SyncEvent.Upsert staleEvent = new SyncEvent.Upsert(
+                "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                 "doc-456",
                 "update",
                 "sharepoint",
@@ -116,6 +118,7 @@ class DocumentMetadataServiceTest {
         when(repository.findById("doc-456")).thenReturn(Optional.of(existing));
 
         SyncEvent.UpdateAcl aclEvent = new SyncEvent.UpdateAcl(
+                "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                 "doc-456",
                 new SyncEvent.AclPayload(List.of("Engineering - Backend"))
         );
@@ -131,7 +134,10 @@ class DocumentMetadataServiceTest {
 
     @Test
     void shouldDeleteDocumentOnDeleteEvent() {
-        SyncEvent.Delete deleteEvent = new SyncEvent.Delete("doc-456");
+        SyncEvent.Delete deleteEvent = new SyncEvent.Delete(
+                "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
+                "doc-456"
+        );
 
         service.processEvent(deleteEvent);
 
