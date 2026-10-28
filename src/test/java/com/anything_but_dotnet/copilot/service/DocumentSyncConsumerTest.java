@@ -1,6 +1,7 @@
 package com.anything_but_dotnet.copilot.service;
 
 import com.anything_but_dotnet.copilot.dto.SyncEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -13,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -90,7 +92,7 @@ class DocumentSyncConsumerTest {
     }
 
     @Test
-    void shouldSkipEventWithMissingDocumentId() {
+    void shouldThrowExceptionWhenDocumentIdIsMissing() {
         String payload = """
                 {
                   "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
@@ -99,13 +101,37 @@ class DocumentSyncConsumerTest {
                 """;
         ConsumerRecord<String, String> record = new ConsumerRecord<>(TOPIC, 0, 4L, null, payload);
 
-        consumer.consume(record);
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> consumer.consume(record)
+        );
 
+        assertEquals("Broken ingestion event", exception.getMessage());
         verify(metadataService, never()).processEvent(any());
     }
 
     @Test
-    void shouldSkipMalformedJsonAndUnknownAction() {
+    void shouldThrowExceptionWhenDocumentIdIsBlank() {
+        String payload = """
+                {
+                  "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
+                  "document_id": "   ",
+                  "action": "delete"
+                }
+                """;
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(TOPIC, 0, 5L, null, payload);
+
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> consumer.consume(record)
+        );
+
+        assertEquals("Broken ingestion event", exception.getMessage());
+        verify(metadataService, never()).processEvent(any());
+    }
+
+    @Test
+    void shouldThrowExceptionWhenActionIsUnknown() {
         String invalidActionPayload = """
                 {
                   "sync_id": "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
@@ -113,12 +139,29 @@ class DocumentSyncConsumerTest {
                   "action": "unknown_action"
                 }
                 """;
-        ConsumerRecord<String, String> record1 = new ConsumerRecord<>(TOPIC, 0, 5L, "doc-456", invalidActionPayload);
-        ConsumerRecord<String, String> record2 = new ConsumerRecord<>(TOPIC, 0, 6L, "doc-456", "{broken-json");
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(TOPIC, 0, 6L, "doc-456", invalidActionPayload);
 
-        consumer.consume(record1);
-        consumer.consume(record2);
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> consumer.consume(record)
+        );
 
+        assertEquals("Incorrect ingestion payload", exception.getMessage());
+        assertInstanceOf(JsonProcessingException.class, exception.getCause());
+        verify(metadataService, never()).processEvent(any());
+    }
+
+    @Test
+    void shouldThrowExceptionWhenJsonIsMalformed() {
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(TOPIC, 0, 7L, "doc-456", "{broken-json");
+
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> consumer.consume(record)
+        );
+
+        assertEquals("Incorrect ingestion payload", exception.getMessage());
+        assertInstanceOf(JsonProcessingException.class, exception.getCause());
         verify(metadataService, never()).processEvent(any());
     }
 }

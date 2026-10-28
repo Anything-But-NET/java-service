@@ -9,8 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
-import java.util.Optional;
-
 @Service
 public class DocumentSyncConsumer {
 
@@ -32,10 +30,10 @@ public class DocumentSyncConsumer {
             return;
         }
 
-        parseEvent(record).ifPresent(metadataService::processEvent);
+        metadataService.processEvent(parseEvent(record));
     }
 
-    private Optional<SyncEvent> parseEvent(ConsumerRecord<String, String> record) {
+    private SyncEvent parseEvent(ConsumerRecord<String, String> record) {
         try {
             SyncEvent event = objectMapper.readValue(record.value(), SyncEvent.class);
 
@@ -44,15 +42,15 @@ public class DocumentSyncConsumer {
                         "Skipping ingestion event with missing document_id (topic={}, partition={}, offset={})",
                         record.topic(), record.partition(), record.offset()
                 );
-                return Optional.empty();
+                throw new IllegalArgumentException("Broken ingestion event");
             }
-            return Optional.of(event);
+            return event;
         } catch (JsonProcessingException e) {
             log.error(
                     "Invalid ingestion payload (topic={}, partition={}, offset={}): {}",
                     record.topic(), record.partition(), record.offset(), e.getMessage()
             );
-            return Optional.empty();
+            throw new IllegalArgumentException("Incorrect ingestion payload", e);
         }
     }
 }
