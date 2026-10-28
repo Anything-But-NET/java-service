@@ -24,9 +24,11 @@ import java.util.Objects;
 public sealed interface SyncEvent permits SyncEvent.Upsert, SyncEvent.UpdateAcl, SyncEvent.Delete {
 
     String documentId();
+    String syncId();
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Upsert(
+            @JsonProperty("sync_id") String syncId,
             @JsonProperty("document_id") String documentId,
             @JsonProperty("action") String action,
             @JsonProperty("source_system") String sourceSystem,
@@ -43,6 +45,7 @@ public sealed interface SyncEvent permits SyncEvent.Upsert, SyncEvent.UpdateAcl,
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record UpdateAcl(
+            @JsonProperty("sync_id") String syncId,
             @JsonProperty("document_id") String documentId,
             @JsonProperty("acl") AclPayload acl
     ) implements SyncEvent {
@@ -53,6 +56,7 @@ public sealed interface SyncEvent permits SyncEvent.Upsert, SyncEvent.UpdateAcl,
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Delete(
+            @JsonProperty("sync_id") String syncId,
             @JsonProperty("document_id") String documentId
     ) implements SyncEvent {}
 

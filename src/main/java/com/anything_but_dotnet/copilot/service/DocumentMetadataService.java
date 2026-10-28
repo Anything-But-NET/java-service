@@ -34,7 +34,7 @@ public class DocumentMetadataService {
         switch (event) {
             case SyncEvent.Upsert upsert -> upsertDocument(upsert);
             case SyncEvent.UpdateAcl updateAcl -> updateAcl(updateAcl);
-            case SyncEvent.Delete(var documentId) -> deleteByDocumentId(documentId);
+            case SyncEvent.Delete(_, var documentId) -> deleteByDocumentId(documentId);
         }
     }
 
