@@ -41,7 +41,7 @@ public class RagGenerationOrchestrator {
     private RagRetrievalResponse createFallbackResponse(String queryId) {
         return new RagRetrievalResponse(
                 queryId,
-                GenerationStatus.EMPTY_RETRIEVAL,
+                GenerationStatus.ERROR,
                 null,
                 0.0,
                 List.of()

@@ -51,7 +51,7 @@ class RagGenerationOrchestratorTest {
 
         RagRetrievalResponse response = orchestrator.processUserQuery(request);
 
-        assertEquals(GenerationStatus.EMPTY_RETRIEVAL, response.status());
+        assertEquals(GenerationStatus.ERROR, response.status());
         verify(diagnosticsService).recordFailure("q-2", ErrorCategory.LLM_PROVIDER_ERROR);
     }
 }

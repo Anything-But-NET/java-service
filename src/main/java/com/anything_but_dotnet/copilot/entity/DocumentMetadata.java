@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Objects;
 
 @Entity
-@Table(name = "document_metadata")
+@Table(schema = "core", name = "document_metadata")
 public class DocumentMetadata {
 
     @Id
