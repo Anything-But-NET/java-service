@@ -1,4 +1,4 @@
-package com.anything_but_dotnet.copilot.entity;
+package com.anything_but_dotnet.copilot.model;
 
 public enum SyncStatus {
     IN_PROGRESS,

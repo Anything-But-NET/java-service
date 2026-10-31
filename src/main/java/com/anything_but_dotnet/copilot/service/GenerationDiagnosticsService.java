@@ -1,27 +1,35 @@
 package com.anything_but_dotnet.copilot.service;
 
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
+import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.repository.GenerationDiagnosticsRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.UUID;
 
 @Service
 public class GenerationDiagnosticsService {
-    private static final Logger log = LoggerFactory.getLogger(GenerationDiagnosticsService.class);
-    private final GenerationDiagnosticsRepository repository;
 
-    public GenerationDiagnosticsService(GenerationDiagnosticsRepository repository) {
+    private final GenerationDiagnosticsRepository repository;
+    private final Clock clock;
+
+    public GenerationDiagnosticsService(GenerationDiagnosticsRepository repository, Clock clock) {
         this.repository = repository;
+        this.clock = clock;
     }
 
     public void recordSuccess(String queryId, Double confidenceScore) {
-        log.info("Recording safe diagnostics: success for query {}", queryId);
-        repository.save(new GenerationDiagnostics(queryId, "success", null, confidenceScore));
+        GenerationDiagnostics diagnostics = GenerationDiagnostics.success(
+                UUID.randomUUID(), queryId, confidenceScore, Instant.now(clock)
+        );
+        repository.save(diagnostics);
     }
 
-    public void recordFailure(String queryId, String errorCategory) {
-        log.error("Recording safe diagnostics: failure for query {} with category {}", queryId, errorCategory);
-        repository.save(new GenerationDiagnostics(queryId, "failure", errorCategory, null));
+    public void recordFailure(String queryId, ErrorCategory errorCategory) {
+        GenerationDiagnostics diagnostics = GenerationDiagnostics.failure(
+                UUID.randomUUID(), queryId, errorCategory, Instant.now(clock)
+        );
+        repository.save(diagnostics);
     }
 }

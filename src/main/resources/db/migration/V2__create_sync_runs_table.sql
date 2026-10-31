@@ -1,9 +1,5 @@
 CREATE TYPE core.sync_status AS ENUM (
-    'IN_PROGRESS',
-    'COMPLETED',
-    'FAILED_FETCH',
-    'FAILED_PARSE',
-    'FAILED_STORAGE'
+    'IN_PROGRESS', 'COMPLETED', 'FAILED_FETCH', 'FAILED_PARSE', 'FAILED_STORAGE'
 );
 
 CREATE TABLE core.document_sync_runs (
@@ -11,7 +7,7 @@ CREATE TABLE core.document_sync_runs (
     document_id VARCHAR(255) NOT NULL,
     status core.sync_status NOT NULL DEFAULT 'IN_PROGRESS',
     error_message TEXT,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ NOT NULL,
     finished_at TIMESTAMPTZ
 );
 

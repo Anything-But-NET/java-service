@@ -1,5 +1,6 @@
 package com.anything_but_dotnet.copilot.service;
 
+import com.anything_but_dotnet.copilot.dto.AclPayload;
 import com.anything_but_dotnet.copilot.dto.SyncEvent;
 import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
 import com.anything_but_dotnet.copilot.repository.DocumentMetadataRepository;
@@ -50,7 +51,7 @@ class DocumentMetadataServiceTest {
                 "https://company.sharepoint.com/docs/it-comp",
                 "Full text",
                 eventUpdated,
-                new SyncEvent.AclPayload(List.of("devs", "all-employees"))
+                new AclPayload(List.of("devs", "all-employees"))
         );
 
         when(repository.findById("doc-456")).thenReturn(Optional.empty());
@@ -93,7 +94,7 @@ class DocumentMetadataServiceTest {
                 "https://company.sharepoint.com/docs/it-comp",
                 "Old text",
                 Instant.parse("2026-10-26T16:00:00Z"),
-                new SyncEvent.AclPayload(List.of("all-employees"))
+                new AclPayload(List.of("all-employees"))
         );
 
         service.processEvent(staleEvent);
@@ -120,7 +121,7 @@ class DocumentMetadataServiceTest {
         SyncEvent.UpdateAcl aclEvent = new SyncEvent.UpdateAcl(
                 "547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8",
                 "doc-456",
-                new SyncEvent.AclPayload(List.of("Engineering - Backend"))
+                new AclPayload(List.of("Engineering - Backend"))
         );
 
         service.processEvent(aclEvent);

@@ -7,7 +7,6 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
@@ -59,21 +58,4 @@ public sealed interface SyncEvent permits SyncEvent.Upsert, SyncEvent.UpdateAcl,
             @JsonProperty("sync_id") String syncId,
             @JsonProperty("document_id") String documentId
     ) implements SyncEvent {}
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    record AclPayload(
-            @JsonProperty("allowed_groups") List<String> allowedGroups
-    ) {
-        public List<String> normalizedGroups() {
-            if (allowedGroups == null || allowedGroups.isEmpty()) {
-                return List.of();
-            }
-            return allowedGroups.stream()
-                    .filter(Objects::nonNull)
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .distinct()
-                    .toList();
-        }
-    }
 }

@@ -1,12 +1,12 @@
 package com.anything_but_dotnet.copilot.dto;
 
-import com.anything_but_dotnet.copilot.entity.SyncStatus;
-import java.util.UUID;
+import com.anything_but_dotnet.copilot.model.SyncStatus;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record KafkaSyncStatusEvent(
-        UUID sync_id,
-        String document_id,
-        SyncStatus status,
-        String error_message,
-        Long timestamp
+        @JsonProperty("sync_id") String syncId,
+        @JsonProperty("document_id") String documentId,
+        @JsonProperty("status") SyncStatus status,
+        @JsonProperty("error_message") String errorMessage,
+        @JsonProperty("timestamp") Long timestamp
 ) {}

@@ -1,11 +1,9 @@
 package com.anything_but_dotnet.copilot.dto;
 
-import java.util.List;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record RagRetrievalRequest(
-        String query_id,
-        String query,
-        AclPayload user_permissions
-) {
-    public record AclPayload(List<String> allowed_groups) {}
-}
+        @JsonProperty("query_id") String queryId,
+        @JsonProperty("query") String query,
+        @JsonProperty("user_permissions") AclPayload userPermissions
+) {}

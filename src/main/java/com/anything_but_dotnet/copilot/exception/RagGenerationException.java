@@ -1,14 +1,22 @@
 package com.anything_but_dotnet.copilot.exception;
 
-public class RagGenerationException extends RuntimeException {
-    private final String errorCategory;
+import com.anything_but_dotnet.copilot.model.ErrorCategory;
 
-    public RagGenerationException(String errorCategory, String message) {
+public class RagGenerationException extends RuntimeException {
+
+    private final ErrorCategory errorCategory;
+
+    public RagGenerationException(String message, ErrorCategory errorCategory) {
         super(message);
         this.errorCategory = errorCategory;
     }
 
-    public String getErrorCategory() {
+    public RagGenerationException(String message, Throwable cause, ErrorCategory errorCategory) {
+        super(message, cause);
+        this.errorCategory = errorCategory;
+    }
+
+    public ErrorCategory getErrorCategory() {
         return errorCategory;
     }
 }

@@ -2,45 +2,42 @@ package com.anything_but_dotnet.copilot.service;
 
 import com.anything_but_dotnet.copilot.dto.KafkaSyncStatusEvent;
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
+import com.anything_but_dotnet.copilot.model.SyncStatus;
 import com.anything_but_dotnet.copilot.repository.DocumentSyncRunRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Component;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.UUID;
 
-import java.time.ZonedDateTime;
-
-@Service
+@Component
 public class SyncStatusKafkaListener {
 
-    private static final Logger log = LoggerFactory.getLogger(SyncStatusKafkaListener.class);
+    private static final Logger logger = LoggerFactory.getLogger(SyncStatusKafkaListener.class);
     private final DocumentSyncRunRepository repository;
+    private final Clock clock;
 
-    public SyncStatusKafkaListener(DocumentSyncRunRepository repository) {
+    public SyncStatusKafkaListener(DocumentSyncRunRepository repository, Clock clock) {
         this.repository = repository;
+        this.clock = clock;
     }
 
-    @KafkaListener(topics = "rag.sync.status.v1", groupId = "copilot-core-group")
-    @Transactional
+    @KafkaListener(topics = "rag.sync.status.v1", groupId = "${spring.kafka.consumer.group-id:core-group}")
     public void handleSyncStatusEvent(KafkaSyncStatusEvent event) {
-        log.info("Received sync status event for document {}: {}", event.document_id(), event.status());
+        logger.info("Received sync status {} for document {}", event.status(), event.documentId());
 
-        // Upsert logic: if exists, update it; otherwise, create a new run
-        DocumentSyncRun run = repository.findById(event.sync_id())
-                .orElseGet(() -> new DocumentSyncRun(
-                        event.sync_id(),
-                        event.document_id(),
-                        event.status(),
-                        event.error_message()
-                ));
+        UUID syncId = UUID.fromString(event.syncId());
+        Instant now = Instant.now(clock);
 
-        run.setStatus(event.status());
-        run.setErrorMessage(event.error_message());
+        DocumentSyncRun run = repository.findById(syncId)
+                .orElseGet(() -> new DocumentSyncRun(syncId, event.documentId(), now));
 
-        // If the process is terminal, set finished_at
-        if (event.status() != com.anything_but_dotnet.copilot.entity.SyncStatus.IN_PROGRESS) {
-            run.setFinishedAt(ZonedDateTime.now());
+        if (event.status() == SyncStatus.COMPLETED) {
+            run.markCompleted(now);
+        } else if (event.status() != SyncStatus.IN_PROGRESS) {
+            run.markFailed(event.status(), event.errorMessage(), now);
         }
 
         repository.save(run);
