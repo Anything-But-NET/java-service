@@ -51,7 +51,7 @@ public class DocumentSyncConsumer {
         metadataService.processEvent(event);
 
         try {
-            UUID syncId = UUID.fromString(event.syncId());
+            UUID syncId = event.syncId();
             Instant now = Instant.now(clock);
 
             DocumentSyncRun run = syncRunRepository.findById(syncId)
