@@ -1,6 +1,7 @@
-package com.anything_but_dotnet.copilot.service;
+package com.anything_but_dotnet.copilot.consumer;
 
 import com.anything_but_dotnet.copilot.dto.SyncEvent;
+import com.anything_but_dotnet.copilot.service.DocumentMetadataService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.ConsumerRecord;

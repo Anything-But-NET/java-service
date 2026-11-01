@@ -31,8 +31,7 @@ public class SyncStatusConsumer {
 
     @Transactional
     @KafkaListener(
-            topics = "${app.kafka.topics.sync-status:rag.sync.status.v1}",
-            groupId = "${app.kafka.consumer.sync-status-group:sync-status-group}"
+            topics = "${app.kafka.topics.sync-status:rag.sync.status.v1}"
     )
     public void handleSyncStatusEvent(String payload) {
         try {

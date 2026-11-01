@@ -1,5 +1,6 @@
 package com.anything_but_dotnet.copilot.service;
 
+import com.anything_but_dotnet.copilot.consumer.DocumentSyncConsumer;
 import com.anything_but_dotnet.copilot.dto.SyncEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
