@@ -15,3 +15,6 @@ CREATE TABLE core.generation_diagnostics (
     confidence_score DOUBLE PRECISION,
     created_at TIMESTAMPTZ NOT NULL
 );
+
+CREATE INDEX idx_gen_diag_query_id ON core.generation_diagnostics(query_id);
+CREATE INDEX idx_gen_diag_created_at ON core.generation_diagnostics(created_at);

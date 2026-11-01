@@ -1,9 +1,9 @@
-package com.anything_but_dotnet.copilot.service;
+package com.anything_but_dotnet.copilot.consumer;
 
-import com.anything_but_dotnet.copilot.dto.KafkaSyncStatusEvent;
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
 import com.anything_but_dotnet.copilot.repository.DocumentSyncRunRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -17,29 +17,37 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
-class SyncStatusKafkaListenerTest {
+class SyncStatusConsumerTest {
 
     private DocumentSyncRunRepository repository;
-    private SyncStatusKafkaListener listener;
+    private SyncStatusConsumer consumer;
+    private ObjectMapper objectMapper;
     private final Instant fixedTime = Instant.parse("2026-10-31T12:00:00Z");
     private final Clock fixedClock = Clock.fixed(fixedTime, ZoneId.of("UTC"));
 
     @BeforeEach
     void setUp() {
         repository = mock(DocumentSyncRunRepository.class);
-        listener = new SyncStatusKafkaListener(repository, fixedClock);
+        objectMapper = new ObjectMapper();
+        consumer = new SyncStatusConsumer(repository, fixedClock, objectMapper);
     }
 
     @Test
     void shouldCreateNewRunIfNotFound() {
         UUID syncId = UUID.randomUUID();
-        KafkaSyncStatusEvent event = new KafkaSyncStatusEvent(
-                syncId.toString(), "doc-123", SyncStatus.FAILED_PARSE, "Error", fixedTime.getEpochSecond()
-        );
+        String payload = """
+                {
+                    "sync_id": "%s",
+                    "document_id": "doc-123",
+                    "status": "FAILED_PARSE",
+                    "error_message": "Error",
+                    "timestamp": %d
+                }
+                """.formatted(syncId.toString(), fixedTime.getEpochSecond());
 
         when(repository.findById(syncId)).thenReturn(Optional.empty());
 
-        listener.handleSyncStatusEvent(event);
+        consumer.handleSyncStatusEvent(payload);
 
         ArgumentCaptor<DocumentSyncRun> captor = ArgumentCaptor.forClass(DocumentSyncRun.class);
         verify(repository).save(captor.capture());
