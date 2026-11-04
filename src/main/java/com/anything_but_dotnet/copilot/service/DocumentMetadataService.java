@@ -1,5 +1,7 @@
 package com.anything_but_dotnet.copilot.service;
 
+import com.anything_but_dotnet.copilot.dto.Citation;
+import com.anything_but_dotnet.copilot.dto.RagCitation;
 import com.anything_but_dotnet.copilot.dto.SyncEvent;
 import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
 import com.anything_but_dotnet.copilot.repository.DocumentMetadataRepository;
@@ -9,6 +11,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class DocumentMetadataService {
@@ -73,5 +79,44 @@ public class DocumentMetadataService {
     private DocumentMetadata findOrCreate(String documentId) {
         return repository.findById(documentId)
                 .orElseGet(() -> DocumentMetadata.create(documentId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Citation> enrichCitations(List<RagCitation> ragCitations) {
+        if (ragCitations == null || ragCitations.isEmpty()) {
+            return List.of();
+        }
+
+        var metadataMap = repository.
+                findAllById(
+                        ragCitations
+                                .stream()
+                                .map(RagCitation::documentId).distinct().toList()
+                )
+                .stream()
+                .collect(
+                        Collectors.toMap(
+                                DocumentMetadata::getDocumentId,
+                                Function.identity()
+                        )
+                );
+
+        return ragCitations.stream()
+                .map(citation -> {
+                    var metadata = metadataMap.get(citation.documentId());
+                    if (metadata == null) {
+                        log.warn("No metadata for document_id={}", citation.documentId());
+                        return null;
+                    }
+                    return new Citation(
+                            metadata.getTitle(),
+                            metadata.getUrl(),
+                            citation.documentId(),
+                            citation.chunkId(),
+                            citation.score()
+                    );
+                })
+                .filter(Objects::nonNull)
+                .toList();
     }
 }
