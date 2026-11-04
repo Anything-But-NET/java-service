@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Optional;
 
 @Component
 public class RagHttpClient {
@@ -30,27 +31,27 @@ public class RagHttpClient {
                 .body(request)
                 .retrieve()
                 .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
-                    GenerationError error = parseError(res.getBody());
-                    ErrorCategory category = (error != null && error.status() != null)
-                            ? error.status()
+                    Optional<GenerationError> error = parseError(res.getBody());
+                    ErrorCategory category = (error.isPresent() && error.get().status() != null)
+                            ? error.get().status()
                             : ErrorCategory.VALIDATION_ERROR;
                     throw new RagGenerationException("Client error during RAG generation", category);
                 })
                 .onStatus(HttpStatusCode::is5xxServerError, (req, res) -> {
-                    GenerationError error = parseError(res.getBody());
-                    ErrorCategory category = (error != null && error.status() != null)
-                            ? error.status()
+                    Optional<GenerationError> error = parseError(res.getBody());
+                    ErrorCategory category = (error.isPresent() && error.get().status() != null)
+                            ? error.get().status()
                             : ErrorCategory.INTERNAL_ERROR;
                     throw new RagGenerationException("Server error during RAG generation", category);
                 })
                 .body(RagRetrievalResponse.class);
     }
 
-    private GenerationError parseError(InputStream body) {
+    private Optional<GenerationError> parseError(InputStream body) {
         try {
-            return objectMapper.readValue(body, GenerationError.class);
+            return Optional.of(objectMapper.readValue(body, GenerationError.class));
         } catch (IOException e) {
-            return null;
+            return Optional.empty();
         }
     }
 }

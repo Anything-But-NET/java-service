@@ -32,7 +32,6 @@ class DocumentMetadataTest {
         assertEquals("Title", doc.getTitle());
         assertEquals("https://company.sharepoint.com/doc-123", doc.getUrl());
         assertEquals(updatedTime, doc.getLastUpdated());
-        assertEquals(List.of("devs", "all-employees"), doc.getAllowedGroups());
         assertEquals(syncTime, doc.getLastSyncAt());
 
         assertTrue(doc.isStale(Instant.parse("2026-10-26T11:59:59Z")));
@@ -56,20 +55,11 @@ class DocumentMetadataTest {
         );
 
         Instant aclSyncTime = Instant.parse("2026-10-26T11:00:00Z");
-        doc.applyAcl(List.of("devs", "managers"), aclSyncTime);
+        doc.applyAcl(aclSyncTime);
 
         assertEquals("Original Title", doc.getTitle());
         assertEquals("https://company.sharepoint.com/doc-123", doc.getUrl());
         assertEquals(initialUpdated, doc.getLastUpdated());
-        assertEquals(List.of("devs", "managers"), doc.getAllowedGroups());
         assertEquals(aclSyncTime, doc.getLastSyncAt());
-    }
-
-    @Test
-    void shouldReturnUnmodifiableAllowedGroups() {
-        DocumentMetadata doc = DocumentMetadata.create("doc-123");
-        doc.applyAcl(List.of("devs"), Instant.parse("2026-10-26T10:00:00Z"));
-
-        assertThrows(UnsupportedOperationException.class, () -> doc.getAllowedGroups().add("hackers"));
     }
 }

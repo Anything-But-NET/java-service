@@ -33,10 +33,6 @@ public class DocumentMetadata {
     @Column(name = "last_updated")
     private Instant lastUpdated;
 
-    @JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "allowed_groups", columnDefinition = "text[]", nullable = false)
-    private List<String> allowedGroups = new ArrayList<>();
-
     @Column(name = "last_sync_at", nullable = false)
     private Instant lastSyncAt;
 
@@ -69,12 +65,10 @@ public class DocumentMetadata {
         this.title = title;
         this.url = url;
         this.lastUpdated = lastUpdated;
-        this.allowedGroups = allowedGroups != null ? new ArrayList<>(allowedGroups) : new ArrayList<>();
         this.lastSyncAt = Objects.requireNonNull(syncedAt, "syncedAt must not be null");
     }
 
-    public void applyAcl(List<String> allowedGroups, Instant syncedAt) {
-        this.allowedGroups = allowedGroups != null ? new ArrayList<>(allowedGroups) : new ArrayList<>();
+    public void applyAcl(Instant syncedAt) {
         this.lastSyncAt = Objects.requireNonNull(syncedAt, "syncedAt must not be null");
     }
 
@@ -96,10 +90,6 @@ public class DocumentMetadata {
 
     public Instant getLastUpdated() {
         return lastUpdated;
-    }
-
-    public List<String> getAllowedGroups() {
-        return Collections.unmodifiableList(allowedGroups);
     }
 
     public Instant getLastSyncAt() {

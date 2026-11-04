@@ -33,7 +33,7 @@ class SyncStatusConsumerTest {
     }
 
     @Test
-    void shouldCreateNewRunIfNotFound() {
+    void shouldUpsertAndMarkFailedWhenStatusIsFailed() {
         UUID syncId = UUID.randomUUID();
         String payload = """
                 {
@@ -45,9 +45,12 @@ class SyncStatusConsumerTest {
                 }
                 """.formatted(syncId.toString(), fixedTime.getEpochSecond());
 
-        when(repository.findById(syncId)).thenReturn(Optional.empty());
+        DocumentSyncRun existingRun = new DocumentSyncRun(syncId, "doc-123", fixedTime);
+        when(repository.findById(syncId)).thenReturn(Optional.of(existingRun));
 
         consumer.handleSyncStatusEvent(payload);
+
+        verify(repository).insertIfNotExists(syncId, "doc-123", fixedTime);
 
         ArgumentCaptor<DocumentSyncRun> captor = ArgumentCaptor.forClass(DocumentSyncRun.class);
         verify(repository).save(captor.capture());
@@ -56,6 +59,55 @@ class SyncStatusConsumerTest {
         assertEquals(syncId, saved.getId());
         assertEquals("doc-123", saved.getDocumentId());
         assertEquals(SyncStatus.FAILED_PARSE, saved.getStatus());
+        assertEquals("Error", saved.getErrorMessage());
         assertEquals(fixedTime, saved.getFinishedAt());
+    }
+
+    @Test
+    void shouldUpsertAndMarkCompletedWhenStatusIsCompleted() {
+        UUID syncId = UUID.randomUUID();
+        String payload = """
+                {
+                    "sync_id": "%s",
+                    "document_id": "doc-123",
+                    "status": "COMPLETED",
+                    "timestamp": %d
+                }
+                """.formatted(syncId.toString(), fixedTime.getEpochSecond());
+
+        DocumentSyncRun existingRun = new DocumentSyncRun(syncId, "doc-123", fixedTime);
+        when(repository.findById(syncId)).thenReturn(Optional.of(existingRun));
+
+        consumer.handleSyncStatusEvent(payload);
+
+        verify(repository).insertIfNotExists(syncId, "doc-123", fixedTime);
+
+        ArgumentCaptor<DocumentSyncRun> captor = ArgumentCaptor.forClass(DocumentSyncRun.class);
+        verify(repository).save(captor.capture());
+
+        DocumentSyncRun saved = captor.getValue();
+        assertEquals(syncId, saved.getId());
+        assertEquals("doc-123", saved.getDocumentId());
+        assertEquals(SyncStatus.COMPLETED, saved.getStatus());
+        assertEquals(fixedTime, saved.getFinishedAt());
+    }
+
+    @Test
+    void shouldOnlyUpsertWhenStatusIsInProgress() {
+        UUID syncId = UUID.randomUUID();
+        String payload = """
+                {
+                    "sync_id": "%s",
+                    "document_id": "doc-123",
+                    "status": "IN_PROGRESS",
+                    "timestamp": %d
+                }
+                """.formatted(syncId.toString(), fixedTime.getEpochSecond());
+
+        consumer.handleSyncStatusEvent(payload);
+
+        verify(repository).insertIfNotExists(syncId, "doc-123", fixedTime);
+        verify(repository, never()).findById(any());
+        verify(repository, never()).save(any());
     }
 }

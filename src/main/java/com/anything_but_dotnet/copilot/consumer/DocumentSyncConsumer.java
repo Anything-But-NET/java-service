@@ -1,7 +1,6 @@
 package com.anything_but_dotnet.copilot.consumer;
 
 import com.anything_but_dotnet.copilot.dto.SyncEvent;
-import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.repository.DocumentSyncRunRepository;
 import com.anything_but_dotnet.copilot.service.DocumentMetadataService;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -48,20 +47,13 @@ public class DocumentSyncConsumer {
 
         SyncEvent event = parseEvent(record);
 
+        UUID syncId = event.syncId();
+        Instant now = Instant.now(clock);
+
+        syncRunRepository.insertIfNotExists(syncId, event.documentId(), now);
+        log.info("Registered IN_PROGRESS sync run {} for document {}", syncId, event.documentId());
+
         metadataService.processEvent(event);
-
-        try {
-            UUID syncId = event.syncId();
-            Instant now = Instant.now(clock);
-
-            DocumentSyncRun run = syncRunRepository.findById(syncId)
-                    .orElseGet(() -> new DocumentSyncRun(syncId, event.documentId(), now));
-
-            syncRunRepository.save(run);
-            log.info("Registered IN_PROGRESS sync run {} for document {}", syncId, event.documentId());
-        } catch (Exception e) {
-            log.error("Failed to register IN_PROGRESS sync run for document {}", event.documentId(), e);
-        }
     }
 
     private SyncEvent parseEvent(ConsumerRecord<String, String> record) {
