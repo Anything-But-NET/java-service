@@ -9,5 +9,5 @@ public record RagRetrievalResponse(
         @JsonProperty("status") GenerationStatus status,
         @JsonProperty("answer") String answer,
         @JsonProperty("confidence_score") Double confidenceScore,
-        @JsonProperty("citations") List<Citation> citations
+        @JsonProperty("citations") List<RagCitation> citations
 ) {}

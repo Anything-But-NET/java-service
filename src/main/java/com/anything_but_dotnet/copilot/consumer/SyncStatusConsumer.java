@@ -46,16 +46,20 @@ public class SyncStatusConsumer {
 
             logger.info("Received sync status {} for document {}", event.status(), event.documentId());
 
-            DocumentSyncRun run = repository.findById(syncId)
-                    .orElseGet(() -> new DocumentSyncRun(syncId, event.documentId(), now));
+            repository.insertIfNotExists(syncId, event.documentId(), now);
 
-            if (event.status() == SyncStatus.COMPLETED) {
-                run.markCompleted(now);
-            } else if (event.status() != SyncStatus.IN_PROGRESS) {
-                run.markFailed(event.status(), event.errorMessage(), now);
+            if (event.status() != SyncStatus.IN_PROGRESS) {
+                DocumentSyncRun run = repository.findById(syncId)
+                        .orElseThrow(() -> new IllegalStateException("Sync run not found after upsert: " + syncId));
+
+                if (event.status() == SyncStatus.COMPLETED) {
+                    run.markCompleted(now);
+                } else {
+                    run.markFailed(event.status(), event.errorMessage(), now);
+                }
+
+                repository.save(run);
             }
-
-            repository.save(run);
 
         } catch (Exception e) {
             logger.error("Failed to process sync status event. Payload: {}", payload, e);

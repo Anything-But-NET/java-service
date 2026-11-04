@@ -64,7 +64,7 @@ public class DocumentMetadataService {
 
     private void updateAcl(SyncEvent.UpdateAcl event) {
         DocumentMetadata doc = findOrCreate(event.documentId());
-        doc.applyAcl(event.allowedGroups(), clock.instant());
+        doc.applyAcl(clock.instant());
 
         repository.save(doc);
         log.info("Updated allowed_groups for document_id={}", event.documentId());

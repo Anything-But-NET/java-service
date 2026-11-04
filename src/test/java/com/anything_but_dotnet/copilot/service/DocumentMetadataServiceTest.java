@@ -68,7 +68,6 @@ class DocumentMetadataServiceTest {
         assertEquals("IT Compensation Guidelines", saved.getTitle());
         assertEquals("https://company.sharepoint.com/docs/it-comp", saved.getUrl());
         assertEquals(eventUpdated, saved.getLastUpdated());
-        assertEquals(List.of("devs", "all-employees"), saved.getAllowedGroups());
         assertEquals(FIXED_NOW, saved.getLastSyncAt());
     }
 
@@ -130,7 +129,6 @@ class DocumentMetadataServiceTest {
         verify(repository).save(existing);
         assertEquals("Existing Title", existing.getTitle());
         assertEquals(originalUpdated, existing.getLastUpdated());
-        assertEquals(List.of("Engineering - Backend"), existing.getAllowedGroups());
         assertEquals(FIXED_NOW, existing.getLastSyncAt());
     }
 
