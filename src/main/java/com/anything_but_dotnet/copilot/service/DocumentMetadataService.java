@@ -1,5 +1,7 @@
 package com.anything_but_dotnet.copilot.service;
 
+import com.anything_but_dotnet.copilot.dto.Citation;
+import com.anything_but_dotnet.copilot.dto.RagCitation;
 import com.anything_but_dotnet.copilot.dto.SyncEvent;
 import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
 import com.anything_but_dotnet.copilot.repository.DocumentMetadataRepository;
@@ -9,6 +11,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class DocumentMetadataService {
@@ -24,18 +30,34 @@ public class DocumentMetadataService {
     }
 
     @Transactional
-    public void deleteByDocumentId(String documentId) {
-        repository.deleteById(documentId);
-        log.info("Deleted metadata for document_id={}", documentId);
-    }
-
-    @Transactional
     public void processEvent(SyncEvent event) {
         switch (event) {
             case SyncEvent.Upsert upsert -> upsertDocument(upsert);
             case SyncEvent.UpdateAcl updateAcl -> updateAcl(updateAcl);
-            case SyncEvent.Delete(_, var documentId) -> deleteByDocumentId(documentId);
+            case SyncEvent.Delete delete -> deleteByDocumentId(delete);
         }
+    }
+
+    private void deleteByDocumentId(SyncEvent.Delete event) {
+        var doc = repository.findById(event.documentId());
+        if (doc.isEmpty()) {
+            log.warn(
+                    "Skipping stale delete event for document_id={} (event last_updated={}, record is not present in db)",
+                    event.documentId(), event.lastUpdated()
+            );
+            return;
+        }
+
+        if (doc.get().isStale(event.lastUpdated())) {
+            log.warn(
+                    "Skipping stale delete event for document_id={} (event last_updated={}, db last_updated={})",
+                    event.documentId(), event.lastUpdated(), doc.get().getLastUpdated()
+            );
+            return;
+        }
+
+        repository.deleteById(event.documentId());
+        log.info("Deleted metadata for document_id={}", event.documentId());
     }
 
     private void upsertDocument(SyncEvent.Upsert event) {
@@ -54,7 +76,6 @@ public class DocumentMetadataService {
                 event.title(),
                 event.url(),
                 event.lastUpdated(),
-                event.allowedGroups(),
                 clock.instant()
         );
 
@@ -64,6 +85,13 @@ public class DocumentMetadataService {
 
     private void updateAcl(SyncEvent.UpdateAcl event) {
         DocumentMetadata doc = findOrCreate(event.documentId());
+        if (doc.isStale(event.lastUpdated())) {
+            log.warn(
+                    "Skipping stale acl update event for document_id={} (event last_updated={}, db last_updated={})",
+                    event.documentId(), event.lastUpdated(), doc.getLastUpdated()
+            );
+            return;
+        }
         doc.applyAcl(clock.instant());
 
         repository.save(doc);
@@ -73,5 +101,44 @@ public class DocumentMetadataService {
     private DocumentMetadata findOrCreate(String documentId) {
         return repository.findById(documentId)
                 .orElseGet(() -> DocumentMetadata.create(documentId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Citation> enrichCitations(List<RagCitation> ragCitations) {
+        if (ragCitations == null || ragCitations.isEmpty()) {
+            return List.of();
+        }
+
+        var metadataMap = repository.
+                findAllById(
+                        ragCitations
+                                .stream()
+                                .map(RagCitation::documentId).distinct().toList()
+                )
+                .stream()
+                .collect(
+                        Collectors.toMap(
+                                DocumentMetadata::getDocumentId,
+                                Function.identity()
+                        )
+                );
+
+        return ragCitations.stream()
+                .map(citation -> {
+                    var metadata = metadataMap.get(citation.documentId());
+                    if (metadata == null) {
+                        log.warn("No metadata for document_id={}", citation.documentId());
+                        return null;
+                    }
+                    return new Citation(
+                            metadata.getTitle(),
+                            metadata.getUrl(),
+                            citation.documentId(),
+                            citation.chunkId(),
+                            citation.score()
+                    );
+                })
+                .filter(Objects::nonNull)
+                .toList();
     }
 }

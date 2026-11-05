@@ -1,6 +1,8 @@
 package com.anything_but_dotnet.copilot.service;
 
 import com.anything_but_dotnet.copilot.dto.AclPayload;
+import com.anything_but_dotnet.copilot.dto.Citation;
+import com.anything_but_dotnet.copilot.dto.RagCitation;
 import com.anything_but_dotnet.copilot.dto.SyncEvent;
 import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
 import com.anything_but_dotnet.copilot.repository.DocumentMetadataRepository;
@@ -19,6 +21,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -79,7 +82,6 @@ class DocumentMetadataServiceTest {
                 "Newer Title",
                 "https://company.sharepoint.com/docs/it-comp",
                 Instant.parse("2026-10-26T17:00:00Z"),
-                List.of("devs"),
                 Instant.parse("2026-10-26T17:01:00Z")
         );
 
@@ -104,7 +106,7 @@ class DocumentMetadataServiceTest {
     }
 
     @Test
-    void shouldUpdateOnlyAllowedGroupsOnUpdateAclEvent() {
+    void shouldUpdateSyncTimeOnUpdateAclEvent() {
         DocumentMetadata existing = DocumentMetadata.create("doc-456");
         Instant originalUpdated = Instant.parse("2026-10-26T15:00:00Z");
         existing.applyUpsert(
@@ -112,7 +114,6 @@ class DocumentMetadataServiceTest {
                 "Existing Title",
                 "https://company.sharepoint.com/docs/it-comp",
                 originalUpdated,
-                List.of("devs"),
                 Instant.parse("2026-10-26T15:05:00Z")
         );
 
@@ -121,6 +122,7 @@ class DocumentMetadataServiceTest {
         SyncEvent.UpdateAcl aclEvent = new SyncEvent.UpdateAcl(
                 UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
                 "doc-456",
+                Instant.parse("2026-10-26T16:00:00Z"),
                 new AclPayload(List.of("Engineering - Backend"))
         );
 
@@ -133,14 +135,120 @@ class DocumentMetadataServiceTest {
     }
 
     @Test
+    void shouldSkipStaleUpdateAclEvent() {
+        DocumentMetadata existing = DocumentMetadata.create("doc-456");
+        existing.applyUpsert(
+                "sharepoint",
+                "Existing Title",
+                "https://company.sharepoint.com/docs/it-comp",
+                Instant.parse("2026-10-26T17:00:00Z"),
+                Instant.parse("2026-10-26T17:05:00Z")
+        );
+
+        when(repository.findById("doc-456")).thenReturn(Optional.of(existing));
+
+        SyncEvent.UpdateAcl staleAclEvent = new SyncEvent.UpdateAcl(
+                UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
+                "doc-456",
+                Instant.parse("2026-10-26T16:00:00Z"),
+                new AclPayload(List.of("Engineering - Backend"))
+        );
+
+        service.processEvent(staleAclEvent);
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
     void shouldDeleteDocumentOnDeleteEvent() {
+        DocumentMetadata existing = DocumentMetadata.create("doc-456");
+        existing.applyUpsert(
+                "sharepoint",
+                "Existing Title",
+                "https://company.sharepoint.com/docs/it-comp",
+                Instant.parse("2026-10-26T15:00:00Z"),
+                Instant.parse("2026-10-26T15:05:00Z")
+        );
+        when(repository.findById("doc-456")).thenReturn(Optional.of(existing));
+
         SyncEvent.Delete deleteEvent = new SyncEvent.Delete(
                 UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
-                "doc-456"
+                "doc-456",
+                Instant.parse("2026-10-26T16:00:00Z")
         );
 
         service.processEvent(deleteEvent);
 
         verify(repository).deleteById("doc-456");
+    }
+
+    @Test
+    void shouldSkipDeleteEventWhenDocumentDoesNotExistOrIsStale() {
+        when(repository.findById("doc-missing")).thenReturn(Optional.empty());
+
+        service.processEvent(new SyncEvent.Delete(
+                UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
+                "doc-missing",
+                Instant.parse("2026-10-26T16:00:00Z")
+        ));
+
+        verify(repository, never()).deleteById(any());
+
+        DocumentMetadata existing = DocumentMetadata.create("doc-456");
+        existing.applyUpsert(
+                "sharepoint",
+                "Existing Title",
+                "https://company.sharepoint.com/docs/it-comp",
+                Instant.parse("2026-10-26T17:00:00Z"),
+                Instant.parse("2026-10-26T17:05:00Z")
+        );
+        when(repository.findById("doc-456")).thenReturn(Optional.of(existing));
+
+        service.processEvent(new SyncEvent.Delete(
+                UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
+                "doc-456",
+                Instant.parse("2026-10-26T16:00:00Z")
+        ));
+
+        verify(repository, never()).deleteById(any());
+    }
+
+    @Test
+    void shouldEnrichCitationsAndDeduplicateDocumentIds() {
+        DocumentMetadata doc = DocumentMetadata.create("doc-456");
+        doc.applyUpsert(
+                "sharepoint",
+                "IT Compensation Guidelines",
+                "https://company.sharepoint.com/docs/it-comp",
+                FIXED_NOW,
+                FIXED_NOW
+        );
+
+        List<RagCitation> ragCitations = List.of(
+                new RagCitation("doc-456", "chunk-1", 0.95),
+                new RagCitation("doc-456", "chunk-2", 0.88),
+                new RagCitation("doc-missing", "chunk-3", 0.75)
+        );
+
+        when(repository.findAllById(List.of("doc-456", "doc-missing"))).thenReturn(List.of(doc));
+
+        List<Citation> enriched = service.enrichCitations(ragCitations);
+
+        assertEquals(2, enriched.size());
+        assertEquals(
+                new Citation("IT Compensation Guidelines", "https://company.sharepoint.com/docs/it-comp", "doc-456", "chunk-1", 0.95),
+                enriched.get(0)
+        );
+        assertEquals(
+                new Citation("IT Compensation Guidelines", "https://company.sharepoint.com/docs/it-comp", "doc-456", "chunk-2", 0.88),
+                enriched.get(1)
+        );
+    }
+
+    @Test
+    void shouldReturnEmptyListWithoutQueryingDbWhenCitationsEmptyOrNull() {
+        assertTrue(service.enrichCitations(List.of()).isEmpty());
+        assertTrue(service.enrichCitations(null).isEmpty());
+        verify(repository, never()).findAllById(any());
     }
 }

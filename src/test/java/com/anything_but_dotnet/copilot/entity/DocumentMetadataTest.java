@@ -3,11 +3,9 @@ package com.anything_but_dotnet.copilot.entity;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DocumentMetadataTest {
@@ -23,7 +21,6 @@ class DocumentMetadataTest {
                 "Title",
                 "https://company.sharepoint.com/doc-123",
                 updatedTime,
-                List.of("devs", "all-employees"),
                 syncTime
         );
 
@@ -40,7 +37,7 @@ class DocumentMetadataTest {
     }
 
     @Test
-    void shouldUpdateOnlyAclAndSyncTimestampOnApplyAcl() {
+    void shouldUpdateSyncTimestampOnApplyAcl() {
         DocumentMetadata doc = DocumentMetadata.create("doc-123");
         Instant initialUpdated = Instant.parse("2026-10-26T10:00:00Z");
         Instant initialSync = Instant.parse("2026-10-26T10:01:00Z");
@@ -50,7 +47,6 @@ class DocumentMetadataTest {
                 "Original Title",
                 "https://company.sharepoint.com/doc-123",
                 initialUpdated,
-                List.of("devs"),
                 initialSync
         );
 
