@@ -21,18 +21,20 @@ public class RagGenerationOrchestrator {
     private final RagHttpClient ragHttpClient;
     private final GenerationDiagnosticsService diagnosticsService;
     private final DocumentMetadataService documentMetadataService;
+    private final UsersService usersService;
 
     public RagGenerationOrchestrator(RagHttpClient ragHttpClient,
                                      GenerationDiagnosticsService diagnosticsService,
-                                     DocumentMetadataService documentMetadataService) {
+                                     DocumentMetadataService documentMetadataService,
+                                     UsersService usersService) {
         this.ragHttpClient = ragHttpClient;
         this.diagnosticsService = diagnosticsService;
         this.documentMetadataService = documentMetadataService;
+        this.usersService = usersService;
     }
 
     public UserQuestionResponse generateUserQuestions(UserQuestionRequest request) {
-        // TODO: replace with actual ACL resolution service
-        var userGroups = new AclPayload(List.of(request.userEmail()));
+        var userGroups = new AclPayload(usersService.getUserGroups(request.userEmail()));
 
         var result = processUserQuery(new RagRetrievalRequest(request.queryId(), request.query(), userGroups));
 

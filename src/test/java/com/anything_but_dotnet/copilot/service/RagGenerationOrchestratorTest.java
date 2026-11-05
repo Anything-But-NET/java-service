@@ -21,6 +21,7 @@ class RagGenerationOrchestratorTest {
     private RagHttpClient httpClient;
     private GenerationDiagnosticsService diagnosticsService;
     private DocumentMetadataService documentMetadataService;
+    private UsersService usersService;
     private RagGenerationOrchestrator orchestrator;
 
     @BeforeEach
@@ -28,7 +29,8 @@ class RagGenerationOrchestratorTest {
         httpClient = mock(RagHttpClient.class);
         diagnosticsService = mock(GenerationDiagnosticsService.class);
         documentMetadataService = mock(DocumentMetadataService.class);
-        orchestrator = new RagGenerationOrchestrator(httpClient, diagnosticsService, documentMetadataService);
+        usersService = mock(UsersService.class);
+        orchestrator = new RagGenerationOrchestrator(httpClient, diagnosticsService, documentMetadataService, usersService);
     }
 
     @Test
@@ -99,6 +101,7 @@ class RagGenerationOrchestratorTest {
                 )
         );
 
+        when(usersService.getUserGroups("oleh.pona@company.com")).thenReturn(List.of("devs", "all-employees"));
         when(httpClient.generateAnswer(any())).thenReturn(new RagRetrievalResponse(
                 "req-123",
                 GenerationStatus.ANSWER_GENERATED,
@@ -114,6 +117,7 @@ class RagGenerationOrchestratorTest {
         assertEquals(QuestionStatus.ANSWERED, response.status());
         assertEquals("To get internet compensation, submit the reimbursement form on SharePoint.", response.replyText());
         assertEquals(enrichedCitations, response.citations());
+        verify(usersService).getUserGroups("oleh.pona@company.com");
         verify(documentMetadataService).enrichCitations(ragCitations);
     }
 

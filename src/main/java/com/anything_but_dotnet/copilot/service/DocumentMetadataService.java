@@ -30,18 +30,34 @@ public class DocumentMetadataService {
     }
 
     @Transactional
-    public void deleteByDocumentId(String documentId) {
-        repository.deleteById(documentId);
-        log.info("Deleted metadata for document_id={}", documentId);
-    }
-
-    @Transactional
     public void processEvent(SyncEvent event) {
         switch (event) {
             case SyncEvent.Upsert upsert -> upsertDocument(upsert);
             case SyncEvent.UpdateAcl updateAcl -> updateAcl(updateAcl);
-            case SyncEvent.Delete(_, var documentId) -> deleteByDocumentId(documentId);
+            case SyncEvent.Delete delete -> deleteByDocumentId(delete);
         }
+    }
+
+    private void deleteByDocumentId(SyncEvent.Delete event) {
+        var doc = repository.findById(event.documentId());
+        if (doc.isEmpty()) {
+            log.warn(
+                    "Skipping stale delete event for document_id={} (event last_updated={}, record is not present in db)",
+                    event.documentId(), event.lastUpdated()
+            );
+            return;
+        }
+
+        if (doc.get().isStale(event.lastUpdated())) {
+            log.warn(
+                    "Skipping stale delete event for document_id={} (event last_updated={}, db last_updated={})",
+                    event.documentId(), event.lastUpdated(), doc.get().getLastUpdated()
+            );
+            return;
+        }
+
+        repository.deleteById(event.documentId());
+        log.info("Deleted metadata for document_id={}", event.documentId());
     }
 
     private void upsertDocument(SyncEvent.Upsert event) {
@@ -60,7 +76,6 @@ public class DocumentMetadataService {
                 event.title(),
                 event.url(),
                 event.lastUpdated(),
-                event.allowedGroups(),
                 clock.instant()
         );
 
@@ -70,6 +85,13 @@ public class DocumentMetadataService {
 
     private void updateAcl(SyncEvent.UpdateAcl event) {
         DocumentMetadata doc = findOrCreate(event.documentId());
+        if (doc.isStale(event.lastUpdated())) {
+            log.warn(
+                    "Skipping stale acl update event for document_id={} (event last_updated={}, db last_updated={})",
+                    event.documentId(), event.lastUpdated(), doc.getLastUpdated()
+            );
+            return;
+        }
         doc.applyAcl(clock.instant());
 
         repository.save(doc);

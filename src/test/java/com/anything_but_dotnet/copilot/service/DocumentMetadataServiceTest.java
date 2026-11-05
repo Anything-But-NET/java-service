@@ -82,7 +82,6 @@ class DocumentMetadataServiceTest {
                 "Newer Title",
                 "https://company.sharepoint.com/docs/it-comp",
                 Instant.parse("2026-10-26T17:00:00Z"),
-                List.of("devs"),
                 Instant.parse("2026-10-26T17:01:00Z")
         );
 
@@ -107,7 +106,7 @@ class DocumentMetadataServiceTest {
     }
 
     @Test
-    void shouldUpdateOnlyAllowedGroupsOnUpdateAclEvent() {
+    void shouldUpdateSyncTimeOnUpdateAclEvent() {
         DocumentMetadata existing = DocumentMetadata.create("doc-456");
         Instant originalUpdated = Instant.parse("2026-10-26T15:00:00Z");
         existing.applyUpsert(
@@ -115,7 +114,6 @@ class DocumentMetadataServiceTest {
                 "Existing Title",
                 "https://company.sharepoint.com/docs/it-comp",
                 originalUpdated,
-                List.of("devs"),
                 Instant.parse("2026-10-26T15:05:00Z")
         );
 
@@ -124,6 +122,7 @@ class DocumentMetadataServiceTest {
         SyncEvent.UpdateAcl aclEvent = new SyncEvent.UpdateAcl(
                 UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
                 "doc-456",
+                Instant.parse("2026-10-26T16:00:00Z"),
                 new AclPayload(List.of("Engineering - Backend"))
         );
 
@@ -136,15 +135,82 @@ class DocumentMetadataServiceTest {
     }
 
     @Test
+    void shouldSkipStaleUpdateAclEvent() {
+        DocumentMetadata existing = DocumentMetadata.create("doc-456");
+        existing.applyUpsert(
+                "sharepoint",
+                "Existing Title",
+                "https://company.sharepoint.com/docs/it-comp",
+                Instant.parse("2026-10-26T17:00:00Z"),
+                Instant.parse("2026-10-26T17:05:00Z")
+        );
+
+        when(repository.findById("doc-456")).thenReturn(Optional.of(existing));
+
+        SyncEvent.UpdateAcl staleAclEvent = new SyncEvent.UpdateAcl(
+                UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
+                "doc-456",
+                Instant.parse("2026-10-26T16:00:00Z"),
+                new AclPayload(List.of("Engineering - Backend"))
+        );
+
+        service.processEvent(staleAclEvent);
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
     void shouldDeleteDocumentOnDeleteEvent() {
+        DocumentMetadata existing = DocumentMetadata.create("doc-456");
+        existing.applyUpsert(
+                "sharepoint",
+                "Existing Title",
+                "https://company.sharepoint.com/docs/it-comp",
+                Instant.parse("2026-10-26T15:00:00Z"),
+                Instant.parse("2026-10-26T15:05:00Z")
+        );
+        when(repository.findById("doc-456")).thenReturn(Optional.of(existing));
+
         SyncEvent.Delete deleteEvent = new SyncEvent.Delete(
                 UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
-                "doc-456"
+                "doc-456",
+                Instant.parse("2026-10-26T16:00:00Z")
         );
 
         service.processEvent(deleteEvent);
 
         verify(repository).deleteById("doc-456");
+    }
+
+    @Test
+    void shouldSkipDeleteEventWhenDocumentDoesNotExistOrIsStale() {
+        when(repository.findById("doc-missing")).thenReturn(Optional.empty());
+
+        service.processEvent(new SyncEvent.Delete(
+                UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
+                "doc-missing",
+                Instant.parse("2026-10-26T16:00:00Z")
+        ));
+
+        verify(repository, never()).deleteById(any());
+
+        DocumentMetadata existing = DocumentMetadata.create("doc-456");
+        existing.applyUpsert(
+                "sharepoint",
+                "Existing Title",
+                "https://company.sharepoint.com/docs/it-comp",
+                Instant.parse("2026-10-26T17:00:00Z"),
+                Instant.parse("2026-10-26T17:05:00Z")
+        );
+        when(repository.findById("doc-456")).thenReturn(Optional.of(existing));
+
+        service.processEvent(new SyncEvent.Delete(
+                UUID.fromString("547f7ca3-1eaa-44c6-91ed-bd8f8e997cf8"),
+                "doc-456",
+                Instant.parse("2026-10-26T16:00:00Z")
+        ));
+
+        verify(repository, never()).deleteById(any());
     }
 
     @Test
@@ -155,7 +221,6 @@ class DocumentMetadataServiceTest {
                 "IT Compensation Guidelines",
                 "https://company.sharepoint.com/docs/it-comp",
                 FIXED_NOW,
-                List.of("devs"),
                 FIXED_NOW
         );
 
