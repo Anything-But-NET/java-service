@@ -25,6 +25,7 @@ public sealed interface SyncEvent permits SyncEvent.Upsert, SyncEvent.UpdateAcl,
 
     String documentId();
     UUID syncId();
+    Instant lastUpdated();
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Upsert(
@@ -47,6 +48,7 @@ public sealed interface SyncEvent permits SyncEvent.Upsert, SyncEvent.UpdateAcl,
     record UpdateAcl(
             @JsonProperty("sync_id") UUID syncId,
             @JsonProperty("document_id") String documentId,
+            @JsonProperty("last_updated") Instant lastUpdated,
             @JsonProperty("acl") AclPayload acl
     ) implements SyncEvent {
         public List<String> allowedGroups() {
@@ -57,6 +59,7 @@ public sealed interface SyncEvent permits SyncEvent.Upsert, SyncEvent.UpdateAcl,
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Delete(
             @JsonProperty("sync_id") UUID syncId,
-            @JsonProperty("document_id") String documentId
+            @JsonProperty("document_id") String documentId,
+            @JsonProperty("last_updated") Instant lastUpdated
     ) implements SyncEvent {}
 }
