@@ -1,6 +1,7 @@
 package com.anything_but_dotnet.copilot.service;
 
 import com.anything_but_dotnet.copilot.dto.*;
+import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
 import com.anything_but_dotnet.copilot.exception.RagGenerationException;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
@@ -8,8 +9,12 @@ import com.anything_but_dotnet.copilot.model.GenerationStatus;
 import com.anything_but_dotnet.copilot.model.QuestionStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.ResourceAccessException;
 
+import java.net.SocketTimeoutException;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -50,7 +55,7 @@ class RagGenerationOrchestratorTest {
     }
 
     @Test
-    void shouldRecordFailureAndRethrowOnException() {
+    void shouldThrowExceptionAndRecordFailureOnRagException() {
         RagRetrievalRequest request = new RagRetrievalRequest("q-2", "test", null);
         when(httpClient.generateAnswer(request)).thenThrow(
                 new RagGenerationException("Error", ErrorCategory.LLM_PROVIDER_ERROR)
@@ -77,6 +82,62 @@ class RagGenerationOrchestratorTest {
 
         assertEquals(ErrorCategory.INTERNAL_CONNECTION_ERROR, thrown.getErrorCategory());
         verify(diagnosticsService).recordFailure("q-3", ErrorCategory.INTERNAL_CONNECTION_ERROR);
+    }
+
+    @Test
+    void shouldHandleTimeoutAndRecordRetrievalTimeoutWhenResourceAccessExceptionIsTimeout() {
+        RagRetrievalRequest request = new RagRetrievalRequest("q-timeout", "test", null);
+        SocketTimeoutException socketTimeout = new SocketTimeoutException("Read timed out");
+        ResourceAccessException accessException =
+                new ResourceAccessException("I/O error on POST request", socketTimeout);
+
+        when(httpClient.generateAnswer(request)).thenThrow(accessException);
+
+        RagGenerationException thrown = assertThrows(
+                RagGenerationException.class,
+                () -> orchestrator.processUserQuery(request)
+        );
+
+        assertEquals(ErrorCategory.RETRIEVAL_TIMEOUT, thrown.getErrorCategory());
+        verify(diagnosticsService).recordFailure("q-timeout", ErrorCategory.RETRIEVAL_TIMEOUT);
+    }
+
+    @Test
+    void shouldPreventDuplicateProcessingOnRetryWhenQueryAlreadyFailed() {
+        RagRetrievalRequest request = new RagRetrievalRequest("q-retry", "test", null);
+        GenerationDiagnostics existing = GenerationDiagnostics.failure(
+                null, "q-retry", ErrorCategory.RETRIEVAL_TIMEOUT, Instant.now()
+        );
+        when(diagnosticsService.findByQueryId("q-retry")).thenReturn(Optional.of(existing));
+
+        RagGenerationException thrown = assertThrows(
+                RagGenerationException.class,
+                () -> orchestrator.processUserQuery(request)
+        );
+
+        assertEquals(ErrorCategory.RETRIEVAL_TIMEOUT, thrown.getErrorCategory());
+        verify(httpClient, never()).generateAnswer(any());
+        verify(diagnosticsService, never()).recordFailure(any(), any());
+        verify(diagnosticsService, never()).recordSuccess(any(), any());
+    }
+
+    @Test
+    void shouldRejectDuplicateQueryWhenQueryAlreadySucceeded() {
+        RagRetrievalRequest request = new RagRetrievalRequest("q-success-dup", "test", null);
+        GenerationDiagnostics existing = GenerationDiagnostics.success(
+                null, "q-success-dup", 0.95, Instant.now()
+        );
+        when(diagnosticsService.findByQueryId("q-success-dup")).thenReturn(Optional.of(existing));
+
+        RagGenerationException thrown = assertThrows(
+                RagGenerationException.class,
+                () -> orchestrator.processUserQuery(request)
+        );
+
+        assertEquals(ErrorCategory.VALIDATION_ERROR, thrown.getErrorCategory());
+        verify(httpClient, never()).generateAnswer(any());
+        verify(diagnosticsService, never()).recordFailure(any(), any());
+        verify(diagnosticsService, never()).recordSuccess(any(), any());
     }
 
     @Test
