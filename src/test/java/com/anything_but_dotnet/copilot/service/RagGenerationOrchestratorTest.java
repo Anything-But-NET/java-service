@@ -7,7 +7,9 @@ import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.ResourceAccessException;
 
+import java.net.SocketTimeoutException;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,5 +55,18 @@ class RagGenerationOrchestratorTest {
 
         assertEquals(GenerationStatus.ERROR, response.status());
         verify(diagnosticsService).recordFailure("q-2", ErrorCategory.LLM_PROVIDER_ERROR);
+    }
+
+    @Test
+    void shouldReturnTimeoutErrorOnTimeout() {
+        RagRetrievalRequest request = new RagRetrievalRequest("q-2", "test", null);
+        when(httpClient.generateAnswer(request)).thenThrow(
+                new ResourceAccessException("", new SocketTimeoutException())
+        );
+
+        RagRetrievalResponse response = orchestrator.processUserQuery(request);
+
+        assertEquals(GenerationStatus.ERROR, response.status());
+        verify(diagnosticsService).recordFailure("q-2", ErrorCategory.RETRIEVAL_TIMEOUT);
     }
 }

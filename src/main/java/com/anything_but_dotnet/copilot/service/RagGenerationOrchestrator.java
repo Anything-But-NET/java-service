@@ -8,6 +8,9 @@ import com.anything_but_dotnet.copilot.model.GenerationStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
+
+import java.net.SocketTimeoutException;
 import java.util.List;
 
 @Service
@@ -28,14 +31,21 @@ public class RagGenerationOrchestrator {
             recordSuccessSafe(request.queryId(), response.confidenceScore());
             return response;
         } catch (RagGenerationException e) {
-            logger.error("RAG pipeline failed for query {}: {}", request.queryId(), e.getMessage());
-            recordFailureSafe(request.queryId(), e.getErrorCategory());
-            return createFallbackResponse(request.queryId());
+            return handleFailure(request.queryId(), e.getErrorCategory(), e.getMessage(), e);
+        } catch (ResourceAccessException e) {
+            if (e.getCause() instanceof SocketTimeoutException) {
+                return handleFailure(request.queryId(), ErrorCategory.RETRIEVAL_TIMEOUT, "RAG service timeout", e);
+            }
+            throw e;
         } catch (Exception e) {
-            logger.error("Unexpected connection error for query {}", request.queryId(), e);
-            recordFailureSafe(request.queryId(), ErrorCategory.INTERNAL_CONNECTION_ERROR);
-            return createFallbackResponse(request.queryId());
+            return handleFailure(request.queryId(), ErrorCategory.INTERNAL_CONNECTION_ERROR, "Unexpected connection error", e);
         }
+    }
+
+    private RagRetrievalResponse handleFailure(String queryId, ErrorCategory category, String message, Exception e) {
+        logger.error("RAG pipeline error for query {}: {}", queryId, message, e);
+        recordFailureSafe(queryId, category);
+        return createFallbackResponse(queryId);
     }
 
     private void recordSuccessSafe(String queryId, Double confidenceScore) {
