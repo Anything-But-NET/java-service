@@ -3,10 +3,7 @@ package com.anything_but_dotnet.copilot.entity;
 import com.anything_but_dotnet.copilot.model.DashboardOperatorAuthority;
 import com.anything_but_dotnet.copilot.model.DashboardOperatorStatus;
 import jakarta.persistence.*;
-import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.JdbcType;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.annotations.*;
 import org.hibernate.dialect.type.PostgreSQLEnumJdbcType;
 import org.hibernate.type.SqlTypes;
 
@@ -31,6 +28,7 @@ public class DashboardOperator {
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "authorities", columnDefinition = "core.dashboard_operator_authority[]", nullable = false)
+    @ColumnTransformer(write = "CAST(? AS core.dashboard_operator_authority[])")
     private List<DashboardOperatorAuthority> authorities = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)

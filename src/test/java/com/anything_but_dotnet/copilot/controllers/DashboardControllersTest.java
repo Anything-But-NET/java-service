@@ -1,6 +1,5 @@
 package com.anything_but_dotnet.copilot.controllers;
 
-import com.anything_but_dotnet.copilot.config.AppConfig;
 import com.anything_but_dotnet.copilot.config.SecurityConfig;
 import com.anything_but_dotnet.copilot.dto.auth.AccessTokenPayload;
 import com.anything_but_dotnet.copilot.dto.auth.RefreshTokenPayload;
@@ -20,7 +19,9 @@ import com.anything_but_dotnet.copilot.service.DashboardOperatorService;
 import com.anything_but_dotnet.copilot.service.DashboardService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.LockedException;
@@ -29,6 +30,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -44,13 +46,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest({AuthController.class, DashboardController.class})
 @Import({
-        AppConfig.class,
         SecurityConfig.class,
         AuthFilter.class,
         DashboardExceptionHandler.class,
         JwtService.class
 })
 class DashboardControllersTest {
+
+    @TestConfiguration
+    static class ClockTestConfig {
+        @Bean
+        Clock clock() {
+            return Clock.systemUTC();
+        }
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -69,9 +78,6 @@ class DashboardControllersTest {
 
     @MockitoBean
     private DashboardService dashboardService;
-
-    @MockitoBean
-    private org.springframework.kafka.core.KafkaTemplate<String, String> kafkaTemplate;
 
     @Test
     void loginReturnsAccessAndRefreshTokensForActiveOperator() throws Exception {
