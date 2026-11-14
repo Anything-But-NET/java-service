@@ -2,6 +2,7 @@ package com.anything_but_dotnet.copilot.repository;
 
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,7 +12,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Repository
-public interface DocumentSyncRunRepository extends JpaRepository<DocumentSyncRun, UUID> {
+public interface DocumentSyncRunRepository
+        extends JpaRepository<DocumentSyncRun, UUID>, JpaSpecificationExecutor<DocumentSyncRun> {
 
     @Modifying
     @Query(

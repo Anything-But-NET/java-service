@@ -8,12 +8,14 @@ import com.anything_but_dotnet.copilot.exception.GatewayExceptionHandler;
 import com.anything_but_dotnet.copilot.exception.RagGenerationException;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.QuestionStatus;
+import com.anything_but_dotnet.copilot.security.JwtService;
 import com.anything_but_dotnet.copilot.service.RagGenerationOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -34,6 +36,12 @@ class GenerationControllerTest {
 
     @MockitoBean
     private RagGenerationOrchestrator ragGenerationOrchestrator;
+
+    @MockitoBean
+    private JwtService jwtService;
+
+    @MockitoBean
+    private UserDetailsService userDetailsService;
 
     @Test
     void shouldReturn200WhenQuestionProcessedSuccessfully() throws Exception {
