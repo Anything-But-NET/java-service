@@ -8,6 +8,8 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:5432/${DB_NAME:copilot_db}
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:example}
+    hikari:
+      connection-timeout: 2000
   jpa:
     open-in-view: false
     hibernate:
@@ -28,3 +30,19 @@ app:
   kafka:
     topics:
       ingestion: ${KAFKA_INGESTION_TOPIC:rag.documents.ingestion.v1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always
+      status:
+        order: DOWN,OUT_OF_SERVICE,DEGRADED,UP,UNKNOWN
+        http-mapping:
+          DOWN: 503
+          OUT_OF_SERVICE: 503
+          DEGRADED: 200
+          UP: 200
