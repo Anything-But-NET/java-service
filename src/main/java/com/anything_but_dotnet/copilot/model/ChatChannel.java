@@ -1,10 +1,10 @@
 package com.anything_but_dotnet.copilot.model;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonAlias;
 
 public enum ChatChannel {
-    @JsonProperty("slack")
+    @JsonAlias("slack")
     SLACK,
-    @JsonProperty("teams")
+    @JsonAlias("teams")
     TEAMS
 }

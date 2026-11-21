@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -27,6 +28,10 @@ public class DashboardOperatorService {
     }
 
     public record OperatorItemWithPassword(DashboardResourceDto.OperatorItem operatorItem, String passwordHash) {}
+
+    public Optional<DashboardResourceDto.OperatorItem> findByEmail(String email) {
+        return dashboardOperatorRepository.findByEmail(email).map(DashboardResourceDto.OperatorItem::from);
+    }
 
     public OperatorItemWithPassword getOperator(String email) {
         DashboardOperator operator = dashboardOperatorRepository.findByEmail(email)

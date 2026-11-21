@@ -1,7 +1,15 @@
 package com.anything_but_dotnet.copilot.dto.dashboard;
 
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.ChannelCount;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.ConfidenceBuckets;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.DailyOutcomePoint;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.ErrorCategoryCount;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.OutcomeCount;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.QuestionOutcomesAnalyticsResponse;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.ReasonCodeCount;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAuthDto.LoginRequest;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAuthDto.RefreshTokenRequest;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAuthDto.TokenIntrospectResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAuthDto.TokensResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.ErrorResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
@@ -15,11 +23,13 @@ import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
 import com.anything_but_dotnet.copilot.entity.User;
+import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.DashboardErrorCode;
 import com.anything_but_dotnet.copilot.model.DashboardOperatorAuthority;
 import com.anything_but_dotnet.copilot.model.DashboardOperatorStatus;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
+import com.anything_but_dotnet.copilot.model.QuestionOutcomeReasonCode;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,6 +42,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -75,6 +86,12 @@ class DashboardDtoTest {
         assertEquals(604800L, json.get("refresh_expires_in").asLong());
         assertFalse(json.has("token_type"));
         assertFalse(json.has("expires_in"));
+
+        TokenIntrospectResponse inactive = TokenIntrospectResponse.inactive();
+        JsonNode inactiveJson = objectMapper.readTree(objectMapper.writeValueAsString(inactive));
+        assertFalse(inactiveJson.get("active").asBoolean());
+        assertTrue(inactiveJson.get("operator_id").isNull());
+        assertTrue(inactiveJson.get("authorities").isArray());
     }
 
     @Test
@@ -86,9 +103,14 @@ class DashboardDtoTest {
         GenerationLogItem invalidScore = new GenerationLogItem(
                 UUID.randomUUID(),
                 "req-1",
-                GenerationOutcome.SUCCESS,
+                ChatChannel.SLACK,
+                GenerationOutcome.ANSWERED,
+                null,
                 null,
                 1.5,
+                100,
+                null,
+                Instant.parse("2026-11-13T12:00:00Z"),
                 Instant.parse("2026-11-13T12:00:00Z")
         );
         assertFalse(validator.validate(invalidScore).isEmpty());
@@ -119,16 +141,66 @@ class DashboardDtoTest {
         assertEquals("2026-11-13T12:00:00Z", json.at("/items/0/started_at").asText());
         assertEquals("2026-11-13T12:01:00Z", json.at("/items/0/finished_at").asText());
 
+        UUID promptId = UUID.randomUUID();
         GenerationDiagnostics failure = GenerationDiagnostics.failure(
                 UUID.randomUUID(),
                 "req-999",
+                ChatChannel.TEAMS,
                 ErrorCategory.INTERNAL_CONNECTION_ERROR,
+                1234,
+                promptId,
                 started
         );
         GenerationLogItem genItem = GenerationLogItem.from(failure);
         assertEquals(GenerationOutcome.FAILURE, genItem.outcome());
+        assertEquals(ChatChannel.TEAMS, genItem.channel());
         assertEquals(ErrorCategory.INTERNAL_CONNECTION_ERROR, genItem.errorCategory());
+        assertEquals(1234, genItem.latencyMs());
+        assertEquals(promptId, genItem.promptVersionId());
         assertNull(genItem.confidenceScore());
+        assertNull(genItem.reasonCode());
+        assertEquals(started, genItem.updatedAt());
+
+        JsonNode genJson = objectMapper.readTree(objectMapper.writeValueAsString(genItem));
+        assertEquals("TEAMS", genJson.get("channel").asText());
+        assertEquals(1234, genJson.get("latency_ms").asInt());
+        assertEquals(promptId.toString(), genJson.get("prompt_version_id").asText());
+    }
+
+    @Test
+    void shouldSerializeQuestionOutcomesAnalyticsMatchingOpenApiContract() throws Exception {
+        QuestionOutcomesAnalyticsResponse response = new QuestionOutcomesAnalyticsResponse(
+                Instant.parse("2026-11-18T00:00:00Z"),
+                Instant.parse("2026-11-21T00:00:00Z"),
+                100L,
+                List.of(new OutcomeCount(GenerationOutcome.ANSWERED, 72L)),
+                0.78,
+                new ConfidenceBuckets(65L, 20L, 12L),
+                1420.5,
+                3180.0,
+                List.of(new ReasonCodeCount(QuestionOutcomeReasonCode.LOW_CONFIDENCE, 12L)),
+                List.of(new ErrorCategoryCount(ErrorCategory.RETRIEVAL_TIMEOUT, 2L)),
+                List.of(new ChannelCount(ChatChannel.SLACK, 92L)),
+                List.of(new DailyOutcomePoint(
+                        LocalDate.of(2026, 11, 18),
+                        30L,
+                        List.of(new OutcomeCount(GenerationOutcome.ANSWERED, 22L))
+                ))
+        );
+
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(response));
+        assertEquals("2026-11-18T00:00:00Z", json.get("from").asText());
+        assertEquals("2026-11-21T00:00:00Z", json.get("to").asText());
+        assertEquals(100L, json.get("total_questions").asLong());
+        assertEquals("ANSWERED", json.at("/outcome_counts/0/outcome").asText());
+        assertEquals(72L, json.at("/outcome_counts/0/count").asLong());
+        assertEquals(65L, json.at("/confidence_buckets/high").asLong());
+        assertEquals(3180.0, json.get("p95_latency_ms").asDouble());
+        assertEquals("LOW_CONFIDENCE", json.at("/reason_code_counts/0/reason_code").asText());
+        assertEquals("RETRIEVAL_TIMEOUT", json.at("/error_category_counts/0/error_category").asText());
+        assertEquals("SLACK", json.at("/channel_counts/0/channel").asText());
+        assertEquals("2026-11-18", json.at("/daily_trend/0/date").asText());
+        assertEquals(30L, json.at("/daily_trend/0/total_questions").asLong());
     }
 
     @Test

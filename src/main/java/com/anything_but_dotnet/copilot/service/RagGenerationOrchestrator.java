@@ -2,9 +2,11 @@ package com.anything_but_dotnet.copilot.service;
 
 import com.anything_but_dotnet.copilot.dto.*;
 import com.anything_but_dotnet.copilot.exception.RagGenerationException;
+import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.GenerationStatus;
+import com.anything_but_dotnet.copilot.model.QuestionOutcomeReasonCode;
 import com.anything_but_dotnet.copilot.model.QuestionStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +15,9 @@ import org.springframework.web.client.ResourceAccessException;
 
 import java.net.SocketTimeoutException;
 import java.net.http.HttpTimeoutException;
+import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class RagGenerationOrchestrator {
@@ -40,7 +44,10 @@ public class RagGenerationOrchestrator {
     public UserQuestionResponse generateUserQuestions(UserQuestionRequest request) {
         var userGroups = new AclPayload(usersService.getUserGroups(request.userEmail()));
 
-        var result = processUserQuery(new RagRetrievalRequest(request.queryId(), request.query(), userGroups));
+        var result = processUserQuery(
+                new RagRetrievalRequest(request.queryId(), request.query(), userGroups),
+                request.channel()
+        );
 
         if (result.status() != GenerationStatus.ANSWER_GENERATED) {
             return new UserQuestionResponse(
@@ -61,13 +68,14 @@ public class RagGenerationOrchestrator {
         );
     }
 
-    RagRetrievalResponse processUserQuery(RagRetrievalRequest request) {
+    RagRetrievalResponse processUserQuery(RagRetrievalRequest request, ChatChannel channel) {
         if (request.queryId() != null) {
             var existing = diagnosticsService.findByQueryId(request.queryId());
             if (existing.isPresent()) {
                 var diag = existing.get();
-                if (diag.getOutcome() == GenerationOutcome.SUCCESS) {
-                    logger.warn("QueryId {} has already been successfully processed. Rejecting duplicate query.", request.queryId());
+                if (diag.getOutcome() != GenerationOutcome.FAILURE) {
+                    logger.warn("QueryId {} has already been processed with outcome {}. Rejecting duplicate query.",
+                            request.queryId(), diag.getOutcome());
                     throw new RagGenerationException("Query has already been successfully processed", ErrorCategory.VALIDATION_ERROR);
                 } else {
                     logger.warn("Retry detected for failed queryId: {}. Preventing duplicate processing.", request.queryId());
@@ -79,24 +87,30 @@ public class RagGenerationOrchestrator {
             }
         }
 
+        long startNanos = System.nanoTime();
         try {
             RagRetrievalResponse response = ragHttpClient.generateAnswer(request);
-            recordSuccessSafe(request.queryId(), response.confidenceScore());
+            int latencyMs = elapsedMillis(startNanos);
+            recordOutcomeSafe(request.queryId(), channel, response, latencyMs);
             return response;
         } catch (RagGenerationException e) {
             logger.error("RAG pipeline failed for query {}: {}", request.queryId(), e.getMessage());
-            recordFailureSafe(request.queryId(), e.getErrorCategory());
+            recordFailureSafe(request.queryId(), channel, e.getErrorCategory(), elapsedMillis(startNanos), null);
             throw e;
         } catch (ResourceAccessException e) {
             ErrorCategory category = isTimeout(e) ? ErrorCategory.RETRIEVAL_TIMEOUT : ErrorCategory.INTERNAL_CONNECTION_ERROR;
             logger.error("RAG request resource access error for query {}: {}", request.queryId(), e.getMessage());
-            recordFailureSafe(request.queryId(), category);
+            recordFailureSafe(request.queryId(), channel, category, elapsedMillis(startNanos), null);
             throw new RagGenerationException("RAG request failed: " + category, e, category);
         } catch (Exception e) {
             logger.error("Unexpected connection error for query {}", request.queryId(), e);
-            recordFailureSafe(request.queryId(), ErrorCategory.INTERNAL_CONNECTION_ERROR);
+            recordFailureSafe(request.queryId(), channel, ErrorCategory.INTERNAL_CONNECTION_ERROR, elapsedMillis(startNanos), null);
             throw new RagGenerationException("Unexpected connection error", e, ErrorCategory.INTERNAL_CONNECTION_ERROR);
         }
+    }
+
+    private int elapsedMillis(long startNanos) {
+        return Math.max(0, (int) Duration.ofNanos(System.nanoTime() - startNanos).toMillis());
     }
 
     private boolean isTimeout(ResourceAccessException e) {
@@ -112,17 +126,36 @@ public class RagGenerationOrchestrator {
         return false;
     }
 
-    private void recordSuccessSafe(String queryId, Double confidenceScore) {
+    private void recordOutcomeSafe(String queryId, ChatChannel channel, RagRetrievalResponse response, int latencyMs) {
         try {
-            diagnosticsService.recordSuccess(queryId, confidenceScore);
+            GenerationStatus status = response.status();
+            if (status == GenerationStatus.ANSWER_GENERATED) {
+                diagnosticsService.recordAnswered(
+                        queryId, channel, response.confidenceScore(), latencyMs, response.promptVersionId()
+                );
+            } else if (status == GenerationStatus.LOW_CONFIDENCE) {
+                diagnosticsService.recordSafeNoAnswer(
+                        queryId, channel, QuestionOutcomeReasonCode.LOW_CONFIDENCE,
+                        response.confidenceScore(), latencyMs, response.promptVersionId()
+                );
+            } else if (status == GenerationStatus.EMPTY_RETRIEVAL) {
+                diagnosticsService.recordSafeNoAnswer(
+                        queryId, channel, QuestionOutcomeReasonCode.EMPTY_RETRIEVAL,
+                        response.confidenceScore(), latencyMs, response.promptVersionId()
+                );
+            } else {
+                diagnosticsService.recordFailure(
+                        queryId, channel, ErrorCategory.INTERNAL_ERROR, latencyMs, response.promptVersionId()
+                );
+            }
         } catch (Exception ex) {
-            logger.warn("Failed to record success diagnostics for query {}", queryId, ex);
+            logger.warn("Failed to record outcome diagnostics for query {}", queryId, ex);
         }
     }
 
-    private void recordFailureSafe(String queryId, ErrorCategory category) {
+    private void recordFailureSafe(String queryId, ChatChannel channel, ErrorCategory category, int latencyMs, UUID promptVersionId) {
         try {
-            diagnosticsService.recordFailure(queryId, category);
+            diagnosticsService.recordFailure(queryId, channel, category, latencyMs, promptVersionId);
         } catch (Exception ex) {
             logger.warn("Failed to record failure diagnostics for query {}", queryId, ex);
         }

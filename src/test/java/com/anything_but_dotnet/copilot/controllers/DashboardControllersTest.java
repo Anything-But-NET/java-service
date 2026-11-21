@@ -3,16 +3,21 @@ package com.anything_but_dotnet.copilot.controllers;
 import com.anything_but_dotnet.copilot.config.SecurityConfig;
 import com.anything_but_dotnet.copilot.dto.auth.AccessTokenPayload;
 import com.anything_but_dotnet.copilot.dto.auth.RefreshTokenPayload;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.ChannelCount;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.ConfidenceBuckets;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.OutcomeCount;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.QuestionOutcomesAnalyticsResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.IngestionLogItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.OperatorItem;
 import com.anything_but_dotnet.copilot.exception.DashboardExceptionHandler;
 import com.anything_but_dotnet.copilot.exception.NotFoundException;
+import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.DashboardOperatorAuthority;
 import com.anything_but_dotnet.copilot.model.DashboardOperatorStatus;
+import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
 import com.anything_but_dotnet.copilot.security.AuthFilter;
-import com.anything_but_dotnet.copilot.security.DashboardSecurityHandlers;
 import com.anything_but_dotnet.copilot.security.JwtService;
 import com.anything_but_dotnet.copilot.security.OperatorDetailsImpl;
 import com.anything_but_dotnet.copilot.service.DashboardOperatorService;
@@ -33,6 +38,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -44,7 +50,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest({AuthController.class, DashboardController.class})
+@WebMvcTest({AuthController.class, DashboardController.class, InternalAuthController.class})
 @Import({
         SecurityConfig.class,
         AuthFilter.class,
@@ -227,6 +233,121 @@ class DashboardControllersTest {
                         .param("size", "500"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void analyticsEndpointsEnforceRbacAndBindLowercaseChannel() throws Exception {
+        Instant from = Instant.parse("2026-11-18T00:00:00Z");
+        Instant to = Instant.parse("2026-11-21T00:00:00Z");
+        UUID promptId = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+
+        QuestionOutcomesAnalyticsResponse payload = new QuestionOutcomesAnalyticsResponse(
+                from,
+                to,
+                10L,
+                List.of(new OutcomeCount(GenerationOutcome.ANSWERED, 8L)),
+                0.82,
+                new ConfidenceBuckets(7L, 2L, 1L),
+                1200.0,
+                2500.0,
+                List.of(),
+                List.of(),
+                List.of(new ChannelCount(ChatChannel.SLACK, 10L)),
+                List.of()
+        );
+        when(dashboardService.getQuestionOutcomeAnalytics(from, to, ChatChannel.SLACK)).thenReturn(payload);
+        when(dashboardService.getPromptOutcomeAnalytics(promptId, from, to, ChatChannel.TEAMS)).thenReturn(payload);
+
+        String analyticsJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "analyst@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.ANALYTICS)
+        ));
+        String promptsJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "prompt@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.PROMPTS)
+        ));
+
+        // ANALYTICS authority can read global analytics with channel=SLACK
+        mockMvc.perform(get("/api/v1/dash/analytics/outcomes")
+                        .header("Authorization", "Bearer " + analyticsJwt)
+                        .param("from", "2026-11-18T00:00:00Z")
+                        .param("to", "2026-11-21T00:00:00Z")
+                        .param("channel", "SLACK"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_questions").value(10))
+                .andExpect(jsonPath("$.outcome_counts[0].outcome").value("ANSWERED"))
+                .andExpect(jsonPath("$.channel_counts[0].channel").value("SLACK"))
+                .andExpect(jsonPath("$.p95_latency_ms").value(2500.0));
+
+        // PROMPTS-only operator cannot read global analytics
+        mockMvc.perform(get("/api/v1/dash/analytics/outcomes")
+                        .header("Authorization", "Bearer " + promptsJwt))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("FORBIDDEN"));
+
+        // PROMPTS authority can read prompt-scoped analytics
+        mockMvc.perform(get("/api/v1/dash/analytics/prompts/{prompt_version_id}/outcomes", promptId)
+                        .header("Authorization", "Bearer " + promptsJwt)
+                        .param("from", "2026-11-18T00:00:00Z")
+                        .param("to", "2026-11-21T00:00:00Z")
+                        .param("channel", "TEAMS"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_questions").value(10));
+
+        // ANALYTICS-only operator cannot read prompt-scoped analytics
+        mockMvc.perform(get("/api/v1/dash/analytics/prompts/{prompt_version_id}/outcomes", promptId)
+                        .header("Authorization", "Bearer " + analyticsJwt))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("FORBIDDEN"));
+
+        // Invalid channel returns 400 BAD_REQUEST
+        mockMvc.perform(get("/api/v1/dash/analytics/outcomes")
+                        .header("Authorization", "Bearer " + analyticsJwt)
+                        .param("channel", "discord"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void internalIntrospectReturnsActiveForValidActiveOperatorAndInactiveOtherwise() throws Exception {
+        UUID operatorId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-11-21T12:00:00Z");
+        String validJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "oleh.pona@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.PROMPTS, DashboardOperatorAuthority.ANALYTICS)
+        ));
+        when(operatorService.findByEmail("oleh.pona@company.com")).thenReturn(Optional.of(new OperatorItem(
+                operatorId,
+                "oleh.pona@company.com",
+                List.of(DashboardOperatorAuthority.PROMPTS, DashboardOperatorAuthority.ANALYTICS),
+                DashboardOperatorStatus.ACTIVE,
+                now, now, now
+        )));
+
+        mockMvc.perform(post("/api/v1/internal/auth/introspect")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token": "%s"}
+                                """.formatted(validJwt)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(true))
+                .andExpect(jsonPath("$.operator_id").value(operatorId.toString()))
+                .andExpect(jsonPath("$.email").value("oleh.pona@company.com"))
+                .andExpect(jsonPath("$.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.authorities[0]").value("PROMPTS"));
+
+        mockMvc.perform(post("/api/v1/internal/auth/introspect")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"token": "invalid.jwt.token"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(false))
+                .andExpect(jsonPath("$.operator_id").isEmpty())
+                .andExpect(jsonPath("$.authorities").isEmpty());
     }
 
     @Test

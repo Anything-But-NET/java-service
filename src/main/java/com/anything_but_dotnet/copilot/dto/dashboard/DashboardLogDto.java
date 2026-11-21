@@ -2,12 +2,15 @@ package com.anything_but_dotnet.copilot.dto.dashboard;
 
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
+import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
+import com.anything_but_dotnet.copilot.model.QuestionOutcomeReasonCode;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -63,9 +66,15 @@ public interface DashboardLogDto {
             @JsonProperty("query_id")
             String queryId,
 
+            @JsonProperty("channel")
+            ChatChannel channel,
+
             @NotNull
             @JsonProperty("outcome")
             GenerationOutcome outcome,
+
+            @JsonProperty("reason_code")
+            QuestionOutcomeReasonCode reasonCode,
 
             @JsonProperty("error_category")
             ErrorCategory errorCategory,
@@ -75,18 +84,33 @@ public interface DashboardLogDto {
             @JsonProperty("confidence_score")
             Double confidenceScore,
 
+            @Min(0)
+            @JsonProperty("latency_ms")
+            Integer latencyMs,
+
+            @JsonProperty("prompt_version_id")
+            UUID promptVersionId,
+
             @NotNull
             @JsonProperty("created_at")
-            Instant createdAt
+            Instant createdAt,
+
+            @JsonProperty("updated_at")
+            Instant updatedAt
     ) {
         public static GenerationLogItem from(GenerationDiagnostics diag) {
             return new GenerationLogItem(
                     diag.getId(),
                     diag.getQueryId(),
+                    diag.getChannel(),
                     diag.getOutcome(),
+                    diag.getReasonCode(),
                     diag.getErrorCategory(),
                     diag.getConfidenceScore(),
-                    diag.getCreatedAt()
+                    diag.getLatencyMs(),
+                    diag.getPromptVersionId(),
+                    diag.getCreatedAt(),
+                    diag.getUpdatedAt()
             );
         }
     }

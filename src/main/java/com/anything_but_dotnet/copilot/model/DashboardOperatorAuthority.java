@@ -7,7 +7,9 @@ public enum DashboardOperatorAuthority {
     LOGS,
     METADATA,
     USERS,
-    OPERATORS;
+    OPERATORS,
+    ANALYTICS,
+    PROMPTS;
 
     public String getAuthority() {
         return switch (this){
@@ -15,6 +17,8 @@ public enum DashboardOperatorAuthority {
             case METADATA -> "METADATA";
             case USERS -> "USERS";
             case OPERATORS -> "OPERATORS";
+            case ANALYTICS -> "ANALYTICS";
+            case PROMPTS -> "PROMPTS";
         };
     }
 }
