@@ -1,5 +1,6 @@
 package com.anything_but_dotnet.copilot.service;
 
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.QuestionOutcomesAnalyticsResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.GenerationLogItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.IngestionLogItem;
@@ -7,6 +8,7 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.Docume
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.UserAclItem;
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
+import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Read-only query service backing Web Dashboard endpoints.
@@ -35,17 +38,20 @@ public class DashboardService {
 
     private final DocumentSyncRunRepository syncRunRepository;
     private final GenerationDiagnosticsRepository diagnosticsRepository;
+    private final GenerationDiagnosticsService diagnosticsService;
     private final DocumentMetadataRepository documentMetadataRepository;
     private final UsersRepository usersRepository;
 
     public DashboardService(
             DocumentSyncRunRepository syncRunRepository,
             GenerationDiagnosticsRepository diagnosticsRepository,
+            GenerationDiagnosticsService diagnosticsService,
             DocumentMetadataRepository documentMetadataRepository,
             UsersRepository usersRepository
     ) {
         this.syncRunRepository = syncRunRepository;
         this.diagnosticsRepository = diagnosticsRepository;
+        this.diagnosticsService = diagnosticsService;
         this.documentMetadataRepository = documentMetadataRepository;
         this.usersRepository = usersRepository;
     }
@@ -106,6 +112,23 @@ public class DashboardService {
             return cb.and(predicates.toArray(Predicate[]::new));
         };
         return PageResponse.from(diagnosticsRepository.findAll(spec, pageable), GenerationLogItem::from);
+    }
+
+    public QuestionOutcomesAnalyticsResponse getQuestionOutcomeAnalytics(
+            Instant from,
+            Instant to,
+            ChatChannel channel
+    ) {
+        return diagnosticsService.getAnalytics(from, to, channel, null);
+    }
+
+    public QuestionOutcomesAnalyticsResponse getPromptOutcomeAnalytics(
+            UUID promptVersionId,
+            Instant from,
+            Instant to,
+            ChatChannel channel
+    ) {
+        return diagnosticsService.getAnalytics(from, to, channel, promptVersionId);
     }
 
     public PageResponse<DocumentMetadataItem> getDocuments(int page, int size) {

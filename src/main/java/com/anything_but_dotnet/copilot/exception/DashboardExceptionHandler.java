@@ -2,6 +2,7 @@ package com.anything_but_dotnet.copilot.exception;
 
 import com.anything_but_dotnet.copilot.controllers.AuthController;
 import com.anything_but_dotnet.copilot.controllers.DashboardController;
+import com.anything_but_dotnet.copilot.controllers.InternalAuthController;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.ErrorResponse;
 import com.anything_but_dotnet.copilot.model.DashboardErrorCode;
 import jakarta.validation.ConstraintViolationException;
@@ -22,7 +23,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import java.time.Clock;
 
-@RestControllerAdvice(assignableTypes = {AuthController.class, DashboardController.class})
+@RestControllerAdvice(assignableTypes = {AuthController.class, DashboardController.class, InternalAuthController.class})
 public class DashboardExceptionHandler {
 
     private final Clock clock;

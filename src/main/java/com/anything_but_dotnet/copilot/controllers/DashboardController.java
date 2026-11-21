@@ -1,5 +1,6 @@
 package com.anything_but_dotnet.copilot.controllers;
 
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.QuestionOutcomesAnalyticsResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.GenerationLogItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.IngestionLogItem;
@@ -7,6 +8,7 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.Docume
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.OperatorItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.UpdateOperatorStatusRequest;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.UserAclItem;
+import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
@@ -62,6 +64,25 @@ public class DashboardController {
             @RequestParam(name = "error_category", required = false) ErrorCategory errorCategory
     ) {
         return dashboardService.getGenerationLogs(page, size, from, to, outcome, errorCategory);
+    }
+
+    @GetMapping("/analytics/outcomes")
+    public QuestionOutcomesAnalyticsResponse getQuestionOutcomeAnalytics(
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @RequestParam(required = false) ChatChannel channel
+    ) {
+        return dashboardService.getQuestionOutcomeAnalytics(from, to, channel);
+    }
+
+    @GetMapping("/analytics/prompts/{prompt_version_id}/outcomes")
+    public QuestionOutcomesAnalyticsResponse getPromptOutcomeAnalytics(
+            @PathVariable("prompt_version_id") UUID promptVersionId,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @RequestParam(required = false) ChatChannel channel
+    ) {
+        return dashboardService.getPromptOutcomeAnalytics(promptVersionId, from, to, channel);
     }
 
     @GetMapping("/documents")

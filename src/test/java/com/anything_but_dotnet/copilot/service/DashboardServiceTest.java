@@ -1,5 +1,6 @@
 package com.anything_but_dotnet.copilot.service;
 
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.QuestionOutcomesAnalyticsResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.GenerationLogItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.IngestionLogItem;
@@ -9,6 +10,7 @@ import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
 import com.anything_but_dotnet.copilot.entity.User;
+import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
@@ -32,6 +34,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,6 +44,8 @@ class DashboardServiceTest {
     private DocumentSyncRunRepository syncRunRepository;
     @Mock
     private GenerationDiagnosticsRepository diagnosticsRepository;
+    @Mock
+    private GenerationDiagnosticsService diagnosticsService;
     @Mock
     private DocumentMetadataRepository documentMetadataRepository;
     @Mock
@@ -53,6 +58,7 @@ class DashboardServiceTest {
         service = new DashboardService(
                 syncRunRepository,
                 diagnosticsRepository,
+                diagnosticsService,
                 documentMetadataRepository,
                 usersRepository
         );
@@ -81,6 +87,23 @@ class DashboardServiceTest {
     }
 
     @Test
+    void delegatesAnalyticsQueriesToDiagnosticsService() {
+        Instant from = Instant.parse("2026-11-18T00:00:00Z");
+        Instant to = Instant.parse("2026-11-21T00:00:00Z");
+        UUID promptId = UUID.randomUUID();
+        QuestionOutcomesAnalyticsResponse expected = QuestionOutcomesAnalyticsResponse.empty(from, to);
+
+        when(diagnosticsService.getAnalytics(from, to, ChatChannel.SLACK, null)).thenReturn(expected);
+        when(diagnosticsService.getAnalytics(from, to, ChatChannel.TEAMS, promptId)).thenReturn(expected);
+
+        assertEquals(expected, service.getQuestionOutcomeAnalytics(from, to, ChatChannel.SLACK));
+        assertEquals(expected, service.getPromptOutcomeAnalytics(promptId, from, to, ChatChannel.TEAMS));
+
+        verify(diagnosticsService).getAnalytics(from, to, ChatChannel.SLACK, null);
+        verify(diagnosticsService).getAnalytics(from, to, ChatChannel.TEAMS, promptId);
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void returnsMappedPagesForLogsDocumentsAndUsers() {
         Instant now = Instant.parse("2026-11-13T12:00:00Z");
@@ -97,7 +120,7 @@ class DashboardServiceTest {
         assertEquals(SyncStatus.COMPLETED, ingestion.items().getFirst().status());
 
         GenerationDiagnostics diag = GenerationDiagnostics.failure(
-                UUID.randomUUID(), "req-1", ErrorCategory.LLM_PROVIDER_ERROR, now
+                UUID.randomUUID(), "req-1", ChatChannel.SLACK, ErrorCategory.LLM_PROVIDER_ERROR, 1500, null, now
         );
         when(diagnosticsRepository.findAll(any(Specification.class), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(diag)));
@@ -107,6 +130,7 @@ class DashboardServiceTest {
         );
         assertEquals(1, generation.items().size());
         assertEquals(ErrorCategory.LLM_PROVIDER_ERROR, generation.items().getFirst().errorCategory());
+        assertEquals(ChatChannel.SLACK, generation.items().getFirst().channel());
 
         DocumentMetadata doc = DocumentMetadata.create("doc-1");
         doc.applyUpsert("sharepoint", "Title", "https://example.com/1", now, now);
