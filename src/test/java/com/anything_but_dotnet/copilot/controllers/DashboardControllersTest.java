@@ -391,4 +391,21 @@ class DashboardControllersTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error_code").value("NOT_FOUND"));
     }
+
+    @Test
+    void actuatorHealthEndpointsArePermittedWithoutAuthentication() throws Exception {
+        int healthStatus = mockMvc.perform(get("/actuator/health"))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+        org.junit.jupiter.api.Assertions.assertNotEquals(401, healthStatus);
+        org.junit.jupiter.api.Assertions.assertNotEquals(403, healthStatus);
+
+        int subPathStatus = mockMvc.perform(get("/actuator/health/readiness"))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+        org.junit.jupiter.api.Assertions.assertNotEquals(401, subPathStatus);
+        org.junit.jupiter.api.Assertions.assertNotEquals(403, subPathStatus);
+    }
 }
