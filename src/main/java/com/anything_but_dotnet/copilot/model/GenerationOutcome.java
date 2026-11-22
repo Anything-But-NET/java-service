@@ -1,6 +1,8 @@
 package com.anything_but_dotnet.copilot.model;
 
 public enum GenerationOutcome {
-    SUCCESS,
+    ANSWERED,
+    SAFE_NO_ANSWER,
+    ESCALATED,
     FAILURE
 }

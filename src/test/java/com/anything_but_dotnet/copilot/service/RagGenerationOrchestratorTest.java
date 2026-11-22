@@ -6,6 +6,7 @@ import com.anything_but_dotnet.copilot.exception.RagGenerationException;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationStatus;
+import com.anything_but_dotnet.copilot.model.QuestionOutcomeReasonCode;
 import com.anything_but_dotnet.copilot.model.QuestionStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,10 +16,15 @@ import java.net.SocketTimeoutException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 class RagGenerationOrchestratorTest {
@@ -28,6 +34,8 @@ class RagGenerationOrchestratorTest {
     private DocumentMetadataService documentMetadataService;
     private UsersService usersService;
     private RagGenerationOrchestrator orchestrator;
+
+    private final UUID promptVersionId = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
 
     @BeforeEach
     void setUp() {
@@ -39,19 +47,19 @@ class RagGenerationOrchestratorTest {
     }
 
     @Test
-    void shouldReturnResponseOnSuccess() {
+    void shouldReturnResponseAndRecordAnsweredOnSuccess() {
         RagRetrievalRequest request = new RagRetrievalRequest("q-1", "test", null);
         RagRetrievalResponse mockResponse = new RagRetrievalResponse(
-                "q-1", GenerationStatus.ANSWER_GENERATED, "answer", 0.9, List.of()
+                "q-1", GenerationStatus.ANSWER_GENERATED, "answer", 0.9, promptVersionId, List.of()
         );
 
         when(httpClient.generateAnswer(request)).thenReturn(mockResponse);
 
-        RagRetrievalResponse response = orchestrator.processUserQuery(request);
+        RagRetrievalResponse response = orchestrator.processUserQuery(request, ChatChannel.TEAMS);
 
         assertEquals("q-1", response.queryId());
         assertEquals(GenerationStatus.ANSWER_GENERATED, response.status());
-        verify(diagnosticsService).recordSuccess("q-1", 0.9);
+        verify(diagnosticsService).recordAnswered(eq("q-1"), eq(ChatChannel.TEAMS), eq(0.9), anyInt(), eq(promptVersionId));
     }
 
     @Test
@@ -63,11 +71,11 @@ class RagGenerationOrchestratorTest {
 
         RagGenerationException thrown = assertThrows(
                 RagGenerationException.class,
-                () -> orchestrator.processUserQuery(request)
+                () -> orchestrator.processUserQuery(request, ChatChannel.SLACK)
         );
 
         assertEquals(ErrorCategory.LLM_PROVIDER_ERROR, thrown.getErrorCategory());
-        verify(diagnosticsService).recordFailure("q-2", ErrorCategory.LLM_PROVIDER_ERROR);
+        verify(diagnosticsService).recordFailure(eq("q-2"), eq(ChatChannel.SLACK), eq(ErrorCategory.LLM_PROVIDER_ERROR), anyInt(), isNull());
     }
 
     @Test
@@ -77,11 +85,11 @@ class RagGenerationOrchestratorTest {
 
         RagGenerationException thrown = assertThrows(
                 RagGenerationException.class,
-                () -> orchestrator.processUserQuery(request)
+                () -> orchestrator.processUserQuery(request, ChatChannel.SLACK)
         );
 
         assertEquals(ErrorCategory.INTERNAL_CONNECTION_ERROR, thrown.getErrorCategory());
-        verify(diagnosticsService).recordFailure("q-3", ErrorCategory.INTERNAL_CONNECTION_ERROR);
+        verify(diagnosticsService).recordFailure(eq("q-3"), eq(ChatChannel.SLACK), eq(ErrorCategory.INTERNAL_CONNECTION_ERROR), anyInt(), isNull());
     }
 
     @Test
@@ -95,49 +103,61 @@ class RagGenerationOrchestratorTest {
 
         RagGenerationException thrown = assertThrows(
                 RagGenerationException.class,
-                () -> orchestrator.processUserQuery(request)
+                () -> orchestrator.processUserQuery(request, ChatChannel.SLACK)
         );
 
         assertEquals(ErrorCategory.RETRIEVAL_TIMEOUT, thrown.getErrorCategory());
-        verify(diagnosticsService).recordFailure("q-timeout", ErrorCategory.RETRIEVAL_TIMEOUT);
+        verify(diagnosticsService).recordFailure(eq("q-timeout"), eq(ChatChannel.SLACK), eq(ErrorCategory.RETRIEVAL_TIMEOUT), anyInt(), isNull());
     }
 
     @Test
     void shouldPreventDuplicateProcessingOnRetryWhenQueryAlreadyFailed() {
         RagRetrievalRequest request = new RagRetrievalRequest("q-retry", "test", null);
         GenerationDiagnostics existing = GenerationDiagnostics.failure(
-                null, "q-retry", ErrorCategory.RETRIEVAL_TIMEOUT, Instant.now()
+                null, "q-retry", ChatChannel.SLACK, ErrorCategory.RETRIEVAL_TIMEOUT, 3000, null, Instant.now()
         );
         when(diagnosticsService.findByQueryId("q-retry")).thenReturn(Optional.of(existing));
 
         RagGenerationException thrown = assertThrows(
                 RagGenerationException.class,
-                () -> orchestrator.processUserQuery(request)
+                () -> orchestrator.processUserQuery(request, ChatChannel.SLACK)
         );
 
         assertEquals(ErrorCategory.RETRIEVAL_TIMEOUT, thrown.getErrorCategory());
         verify(httpClient, never()).generateAnswer(any());
-        verify(diagnosticsService, never()).recordFailure(any(), any());
-        verify(diagnosticsService, never()).recordSuccess(any(), any());
+        verify(diagnosticsService, never()).recordFailure(any(), any(), any(), any(), any());
+        verify(diagnosticsService, never()).recordAnswered(any(), any(), any(), any(), any());
     }
 
     @Test
-    void shouldRejectDuplicateQueryWhenQueryAlreadySucceeded() {
-        RagRetrievalRequest request = new RagRetrievalRequest("q-success-dup", "test", null);
-        GenerationDiagnostics existing = GenerationDiagnostics.success(
-                null, "q-success-dup", 0.95, Instant.now()
+    void shouldRejectDuplicateQueryWhenQueryAlreadyAnsweredOrSafeNoAnswer() {
+        RagRetrievalRequest request = new RagRetrievalRequest("q-answered-dup", "test", null);
+        GenerationDiagnostics existing = GenerationDiagnostics.answered(
+                null, "q-answered-dup", ChatChannel.SLACK, 0.95, 800, null, Instant.now()
         );
-        when(diagnosticsService.findByQueryId("q-success-dup")).thenReturn(Optional.of(existing));
+        when(diagnosticsService.findByQueryId("q-answered-dup")).thenReturn(Optional.of(existing));
 
         RagGenerationException thrown = assertThrows(
                 RagGenerationException.class,
-                () -> orchestrator.processUserQuery(request)
+                () -> orchestrator.processUserQuery(request, ChatChannel.SLACK)
         );
 
         assertEquals(ErrorCategory.VALIDATION_ERROR, thrown.getErrorCategory());
         verify(httpClient, never()).generateAnswer(any());
-        verify(diagnosticsService, never()).recordFailure(any(), any());
-        verify(diagnosticsService, never()).recordSuccess(any(), any());
+        verify(diagnosticsService, never()).recordFailure(any(), any(), any(), any(), any());
+        verify(diagnosticsService, never()).recordAnswered(any(), any(), any(), any(), any());
+
+        RagRetrievalRequest noAnswerDup = new RagRetrievalRequest("q-no-ans-dup", "test", null);
+        GenerationDiagnostics existingNoAns = GenerationDiagnostics.safeNoAnswer(
+                null, "q-no-ans-dup", ChatChannel.SLACK, QuestionOutcomeReasonCode.LOW_CONFIDENCE, 0.3, 900, null, Instant.now()
+        );
+        when(diagnosticsService.findByQueryId("q-no-ans-dup")).thenReturn(Optional.of(existingNoAns));
+
+        RagGenerationException thrown2 = assertThrows(
+                RagGenerationException.class,
+                () -> orchestrator.processUserQuery(noAnswerDup, ChatChannel.SLACK)
+        );
+        assertEquals(ErrorCategory.VALIDATION_ERROR, thrown2.getErrorCategory());
     }
 
     @Test
@@ -168,6 +188,7 @@ class RagGenerationOrchestratorTest {
                 GenerationStatus.ANSWER_GENERATED,
                 "To get internet compensation, submit the reimbursement form on SharePoint.",
                 0.89,
+                promptVersionId,
                 ragCitations
         ));
         when(documentMetadataService.enrichCitations(ragCitations)).thenReturn(enrichedCitations);
@@ -180,10 +201,11 @@ class RagGenerationOrchestratorTest {
         assertEquals(enrichedCitations, response.citations());
         verify(usersService).getUserGroups("oleh.pona@company.com");
         verify(documentMetadataService).enrichCitations(ragCitations);
+        verify(diagnosticsService).recordAnswered(eq("req-123"), eq(ChatChannel.TEAMS), eq(0.89), anyInt(), eq(promptVersionId));
     }
 
     @Test
-    void shouldEscalateToExpertWithoutEnrichingCitationsWhenEmptyRetrieval() {
+    void shouldRecordSafeNoAnswerWithEmptyRetrievalWithoutEnrichingCitations() {
         UserQuestionRequest userRequest = new UserQuestionRequest(
                 "req-123",
                 ChatChannel.SLACK,
@@ -196,6 +218,7 @@ class RagGenerationOrchestratorTest {
                 GenerationStatus.EMPTY_RETRIEVAL,
                 null,
                 0.0,
+                promptVersionId,
                 List.of()
         ));
 
@@ -205,10 +228,14 @@ class RagGenerationOrchestratorTest {
         assertEquals(QuestionStatus.ESCALATED_TO_EXPERT, response.status());
         assertTrue(response.citations().isEmpty());
         verifyNoInteractions(documentMetadataService);
+        verify(diagnosticsService).recordSafeNoAnswer(
+                eq("req-123"), eq(ChatChannel.SLACK), eq(QuestionOutcomeReasonCode.EMPTY_RETRIEVAL),
+                eq(0.0), anyInt(), eq(promptVersionId)
+        );
     }
 
     @Test
-    void shouldEscalateToExpertWithoutEnrichingCitationsWhenLowConfidence() {
+    void shouldRecordSafeNoAnswerWithLowConfidenceWithoutEnrichingCitations() {
         UserQuestionRequest userRequest = new UserQuestionRequest(
                 "req-123",
                 ChatChannel.TEAMS,
@@ -221,6 +248,7 @@ class RagGenerationOrchestratorTest {
                 GenerationStatus.LOW_CONFIDENCE,
                 "Partial uncertain answer...",
                 0.35,
+                promptVersionId,
                 List.of(new RagCitation("doc-789", "987e6543-e21b-12d3-a456-426614174999", 0.42))
         ));
 
@@ -230,5 +258,9 @@ class RagGenerationOrchestratorTest {
         assertEquals(QuestionStatus.ESCALATED_TO_EXPERT, response.status());
         assertTrue(response.citations().isEmpty());
         verifyNoInteractions(documentMetadataService);
+        verify(diagnosticsService).recordSafeNoAnswer(
+                eq("req-123"), eq(ChatChannel.TEAMS), eq(QuestionOutcomeReasonCode.LOW_CONFIDENCE),
+                eq(0.35), anyInt(), eq(promptVersionId)
+        );
     }
 }
