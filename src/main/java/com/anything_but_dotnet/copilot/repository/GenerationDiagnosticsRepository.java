@@ -10,12 +10,15 @@ import org.springframework.stereotype.Repository;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Collection;
+import java.util.List;
 
 @Repository
 public interface GenerationDiagnosticsRepository
         extends JpaRepository<GenerationDiagnostics, UUID>, JpaSpecificationExecutor<GenerationDiagnostics> {
     Optional<GenerationDiagnostics> findFirstByQueryId(String queryId);
     boolean existsByQueryId(String queryId);
+    List<GenerationDiagnostics> findByQueryIdIn(Collection<String> queryIds);
 
     @Query(
             nativeQuery = true,

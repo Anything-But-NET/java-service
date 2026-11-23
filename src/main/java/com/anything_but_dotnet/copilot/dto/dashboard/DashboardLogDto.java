@@ -2,11 +2,13 @@ package com.anything_but_dotnet.copilot.dto.dashboard;
 
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
+import com.anything_but_dotnet.copilot.entity.Escalation;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.QuestionOutcomeReasonCode;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
+import com.anything_but_dotnet.copilot.model.EscalationStatus;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -91,6 +93,12 @@ public interface DashboardLogDto {
             @JsonProperty("prompt_version_id")
             UUID promptVersionId,
 
+            @JsonProperty("escalation_id")
+            UUID escalationId,
+
+            @JsonProperty("resolution_status")
+            EscalationStatus resolutionStatus,
+
             @NotNull
             @JsonProperty("created_at")
             Instant createdAt,
@@ -99,6 +107,9 @@ public interface DashboardLogDto {
             Instant updatedAt
     ) {
         public static GenerationLogItem from(GenerationDiagnostics diag) {
+            return from(diag, null);
+        }
+        public static GenerationLogItem from(GenerationDiagnostics diag, Escalation escalation) {
             return new GenerationLogItem(
                     diag.getId(),
                     diag.getQueryId(),
@@ -109,6 +120,8 @@ public interface DashboardLogDto {
                     diag.getConfidenceScore(),
                     diag.getLatencyMs(),
                     diag.getPromptVersionId(),
+                    escalation != null ? escalation.getId() : null,
+                    escalation != null ? escalation.getStatus() : null,
                     diag.getCreatedAt(),
                     diag.getUpdatedAt()
             );

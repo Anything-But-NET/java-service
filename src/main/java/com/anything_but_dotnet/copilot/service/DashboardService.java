@@ -7,6 +7,7 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.IngestionLo
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.DocumentMetadataItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.UserAclItem;
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
+import com.anything_but_dotnet.copilot.entity.Escalation;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
@@ -14,6 +15,7 @@ import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
 import com.anything_but_dotnet.copilot.repository.DocumentMetadataRepository;
 import com.anything_but_dotnet.copilot.repository.DocumentSyncRunRepository;
+import com.anything_but_dotnet.copilot.repository.EscalationRepository;
 import com.anything_but_dotnet.copilot.repository.GenerationDiagnosticsRepository;
 import com.anything_but_dotnet.copilot.repository.UsersRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -27,7 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Read-only query service backing Web Dashboard endpoints.
@@ -39,6 +44,7 @@ public class DashboardService {
     private final DocumentSyncRunRepository syncRunRepository;
     private final GenerationDiagnosticsRepository diagnosticsRepository;
     private final GenerationDiagnosticsService diagnosticsService;
+    private final EscalationRepository escalationRepository;
     private final DocumentMetadataRepository documentMetadataRepository;
     private final UsersRepository usersRepository;
 
@@ -46,12 +52,14 @@ public class DashboardService {
             DocumentSyncRunRepository syncRunRepository,
             GenerationDiagnosticsRepository diagnosticsRepository,
             GenerationDiagnosticsService diagnosticsService,
+            EscalationRepository escalationRepository,
             DocumentMetadataRepository documentMetadataRepository,
             UsersRepository usersRepository
     ) {
         this.syncRunRepository = syncRunRepository;
         this.diagnosticsRepository = diagnosticsRepository;
         this.diagnosticsService = diagnosticsService;
+        this.escalationRepository = escalationRepository;
         this.documentMetadataRepository = documentMetadataRepository;
         this.usersRepository = usersRepository;
     }
@@ -111,7 +119,18 @@ public class DashboardService {
             }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
-        return PageResponse.from(diagnosticsRepository.findAll(spec, pageable), GenerationLogItem::from);
+        var resultPage = diagnosticsRepository.findAll(spec, pageable);
+        List<String> queryIds = resultPage.getContent().stream()
+                .map(GenerationDiagnostics::getQueryId)
+                .toList();
+        Map<String, Escalation> escalationsByQueryId = queryIds.isEmpty()
+                ? Map.of()
+                : escalationRepository.findByQueryIdIn(queryIds).stream()
+                .collect(Collectors.toMap(Escalation::getQueryId, Function.identity()));
+        return PageResponse.from(
+                resultPage,
+                diag -> GenerationLogItem.from(diag, escalationsByQueryId.get(diag.getQueryId()))
+        );
     }
 
     public QuestionOutcomesAnalyticsResponse getQuestionOutcomeAnalytics(

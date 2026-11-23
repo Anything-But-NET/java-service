@@ -110,6 +110,8 @@ class DashboardDtoTest {
                 1.5,
                 100,
                 null,
+                null,
+                null,
                 Instant.parse("2026-11-13T12:00:00Z"),
                 Instant.parse("2026-11-13T12:00:00Z")
         );
