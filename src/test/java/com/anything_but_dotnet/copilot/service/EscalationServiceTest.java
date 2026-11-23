@@ -26,9 +26,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -72,7 +74,8 @@ class EscalationServiceTest {
                 diagnosticsService,
                 operatorRepository,
                 clock,
-                objectMapper
+                objectMapper,
+                TransactionOperations.withoutTransaction()
         );
     }
 
@@ -135,7 +138,7 @@ class EscalationServiceTest {
         assertEquals(fixedInstant, response.updatedAt());
 
         ArgumentCaptor<Escalation> escCaptor = ArgumentCaptor.forClass(Escalation.class);
-        verify(escalationRepository).save(escCaptor.capture());
+        verify(escalationRepository).saveAndFlush(escCaptor.capture());
         Escalation savedEsc = escCaptor.getValue();
         assertEquals(response.escalationId(), savedEsc.getId());
         assertEquals("oleh.pona@company.com", savedEsc.getRequesterEmail());
@@ -179,8 +182,52 @@ class EscalationServiceTest {
 
         verify(draftRepository, never()).findByQueryIdAndExpiresAtAfter(any(), any());
         verify(diagnosticsService, never()).markEscalated(any());
-        verify(escalationRepository, never()).save(any());
+        verify(escalationRepository, never()).saveAndFlush(any());
         verify(historyRepository, never()).save(any());
+    }
+
+    @Test
+    void createOrGetRecoversIdempotentlyFromConcurrentInsertRaceCondition() {
+        UUID existingId = UUID.randomUUID();
+        Escalation winner = Escalation.createPending(
+                existingId,
+                "req-race",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
+                "[]",
+                fixedInstant
+        );
+        GenerationDiagnostics diag = GenerationDiagnostics.safeNoAnswer(
+                UUID.randomUUID(), "req-race", ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.LOW_CONFIDENCE, 0.31, 1000, null, fixedInstant.minusSeconds(10)
+        );
+        EscalationDraft draft = new EscalationDraft(
+                "req-race",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
+                "[]",
+                fixedInstant.minusSeconds(10),
+                fixedInstant.plusSeconds(890)
+        );
+
+        when(escalationRepository.findByQueryId("req-race"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(diagnosticsService.findByQueryId("req-race")).thenReturn(Optional.of(diag));
+        when(draftRepository.findByQueryIdAndExpiresAtAfter("req-race", fixedInstant))
+                .thenReturn(Optional.of(draft));
+        when(escalationRepository.saveAndFlush(any(Escalation.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key violates uq_escalations_query_id"));
+
+        EscalationResponse response = service.createOrGet("req-race");
+
+        assertEquals(existingId, response.escalationId());
+        assertEquals("req-race", response.queryId());
+        assertEquals(EscalationStatus.PENDING, response.status());
+
+        verify(historyRepository, never()).save(any());
+        verify(diagnosticsService, never()).markEscalated(any());
+        verify(draftRepository, never()).delete(any());
     }
 
     @Test
@@ -208,7 +255,7 @@ class EscalationServiceTest {
         when(draftRepository.findByQueryIdAndExpiresAtAfter("req-expired", fixedInstant)).thenReturn(Optional.empty());
         assertThrows(EscalationDraftExpiredException.class, () -> service.createOrGet("req-expired"));
 
-        verify(escalationRepository, never()).save(any());
+        verify(escalationRepository, never()).saveAndFlush(any());
         verify(historyRepository, never()).save(any());
         verify(diagnosticsService, never()).markEscalated(any());
     }

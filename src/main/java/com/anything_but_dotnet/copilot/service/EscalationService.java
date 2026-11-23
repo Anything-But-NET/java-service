@@ -25,6 +25,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -32,6 +33,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -45,7 +47,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional(readOnly = true)
 public class EscalationService {
 
     private static final Logger logger = LoggerFactory.getLogger(EscalationService.class);
@@ -60,6 +61,7 @@ public class EscalationService {
     private final DashboardOperatorRepository operatorRepository;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    private final TransactionOperations transactionOperations;
 
     public EscalationService(
             EscalationRepository escalationRepository,
@@ -69,7 +71,8 @@ public class EscalationService {
             GenerationDiagnosticsService diagnosticsService,
             DashboardOperatorRepository operatorRepository,
             Clock clock,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            TransactionOperations transactionOperations
     ) {
         this.escalationRepository = escalationRepository;
         this.draftRepository = draftRepository;
@@ -79,6 +82,7 @@ public class EscalationService {
         this.operatorRepository = operatorRepository;
         this.clock = clock;
         this.objectMapper = objectMapper;
+        this.transactionOperations = transactionOperations;
     }
 
     @Transactional
@@ -113,12 +117,22 @@ public class EscalationService {
         }
     }
 
-    @Transactional
     public EscalationResponse createOrGet(String queryId) {
         if (queryId == null || queryId.isBlank()) {
             throw new IllegalArgumentException("query_id must not be blank.");
         }
 
+        try {
+            return transactionOperations.execute(status -> createOrGetInTransaction(queryId));
+        } catch (DataIntegrityViolationException ex) {
+            logger.debug("Concurrent escalation insert detected for queryId {}, reading existing record.", queryId);
+            return escalationRepository.findByQueryId(queryId)
+                    .map(EscalationResponse::from)
+                    .orElseThrow(() -> ex);
+        }
+    }
+
+    private EscalationResponse createOrGetInTransaction(String queryId) {
         // 1. Idempotency check first (even if draft has already been deleted/expired)
         Optional<Escalation> existing = escalationRepository.findByQueryId(queryId);
         if (existing.isPresent()) {
@@ -149,7 +163,7 @@ public class EscalationService {
                 draft.getSourceReferences(),
                 now
         );
-        escalationRepository.save(escalation);
+        escalationRepository.saveAndFlush(escalation);
 
         historyRepository.save(new EscalationStatusHistory(
                 UUID.randomUUID(),
@@ -166,6 +180,7 @@ public class EscalationService {
         return EscalationResponse.from(escalation);
     }
 
+    @Transactional(readOnly = true)
     public PageResponse<EscalationItem> getEscalations(
             int page,
             int size,
@@ -210,6 +225,7 @@ public class EscalationService {
         );
     }
 
+    @Transactional(readOnly = true)
     public EscalationDetail getEscalationById(UUID id) {
         Escalation escalation = escalationRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Escalation not found."));
