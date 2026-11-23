@@ -11,6 +11,9 @@ CREATE TYPE core.escalation_status AS ENUM (
 CREATE TABLE core.escalations (
     id UUID PRIMARY KEY,
     query_id VARCHAR(255) NOT NULL,
+    requester_email VARCHAR(255) NOT NULL,
+    question_text TEXT NOT NULL,
+    source_references JSONB NOT NULL DEFAULT '[]'::jsonb,
     status core.escalation_status NOT NULL DEFAULT 'PENDING',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -38,3 +41,14 @@ CREATE TABLE core.escalation_status_history (
 
 CREATE INDEX idx_esc_history_escalation_id ON core.escalation_status_history (escalation_id);
 CREATE INDEX idx_esc_history_changed_at ON core.escalation_status_history (changed_at);
+
+CREATE TABLE core.escalation_drafts (
+    query_id VARCHAR(255) PRIMARY KEY,
+    requester_email VARCHAR(255) NOT NULL,
+    question_text TEXT NOT NULL,
+    source_references JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_esc_drafts_expires_at ON core.escalation_drafts (expires_at);

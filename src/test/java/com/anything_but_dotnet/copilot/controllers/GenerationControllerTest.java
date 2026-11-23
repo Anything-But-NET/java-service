@@ -8,6 +8,7 @@ import com.anything_but_dotnet.copilot.dto.EscalationResponse;
 import com.anything_but_dotnet.copilot.exception.GatewayExceptionHandler;
 import com.anything_but_dotnet.copilot.exception.RagGenerationException;
 import com.anything_but_dotnet.copilot.exception.NotFoundException;
+import com.anything_but_dotnet.copilot.exception.EscalationDraftExpiredException;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.QuestionStatus;
 import com.anything_but_dotnet.copilot.model.EscalationStatus;
@@ -217,5 +218,25 @@ class GenerationControllerTest {
                 .andExpect(jsonPath("$.query_id").value("req-failed"))
                 .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"))
                 .andExpect(jsonPath("$.user_message").value("Cannot escalate a failed question request."));
+    }
+
+    @Test
+    void shouldReturn410GoneWhenEscalationDraftHasExpired() throws Exception {
+        when(escalationService.createOrGet("req-expired"))
+                .thenThrow(new EscalationDraftExpiredException(
+                        "Escalation confirmation window (15m) has expired. Please ask your question again."
+                ));
+
+        mockMvc.perform(post("/api/v1/chat/escalations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query_id": "req-expired"}
+                                """))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.query_id").value("req-expired"))
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.user_message").value(
+                        "Escalation confirmation window (15m) has expired. Please ask your question again."
+                ));
     }
 }

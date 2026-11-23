@@ -13,6 +13,7 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.Operat
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationDetail;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationStatusHistoryItem;
+import com.anything_but_dotnet.copilot.dto.Citation;
 import com.anything_but_dotnet.copilot.exception.DashboardExceptionHandler;
 import com.anything_but_dotnet.copilot.exception.NotFoundException;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
@@ -426,6 +427,8 @@ class DashboardControllersTest {
         EscalationItem item = new EscalationItem(
                 escalationId,
                 "req-123",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
                 EscalationStatus.PENDING,
                 ChatChannel.SLACK,
                 QuestionOutcomeReasonCode.LOW_CONFIDENCE,
@@ -437,6 +440,15 @@ class DashboardControllersTest {
         EscalationDetail detail = new EscalationDetail(
                 escalationId,
                 "req-123",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
+                List.of(new Citation(
+                        "IT Compensation Guidelines",
+                        "https://company.sharepoint.com/docs/it-comp",
+                        "doc-456",
+                        "123e4567-e89b-12d3-a456-426614174000",
+                        0.42
+                )),
                 EscalationStatus.IN_PROGRESS,
                 ChatChannel.SLACK,
                 QuestionOutcomeReasonCode.LOW_CONFIDENCE,
@@ -455,6 +467,8 @@ class DashboardControllersTest {
         EscalationItem updated = new EscalationItem(
                 escalationId,
                 "req-123",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
                 EscalationStatus.IN_PROGRESS,
                 ChatChannel.SLACK,
                 QuestionOutcomeReasonCode.LOW_CONFIDENCE,
@@ -494,12 +508,17 @@ class DashboardControllersTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].id").value(escalationId.toString()))
                 .andExpect(jsonPath("$.items[0].query_id").value("req-123"))
+                .andExpect(jsonPath("$.items[0].requester_email").value("oleh.pona@company.com"))
+                .andExpect(jsonPath("$.items[0].question_text").value("How to get internet compensation?"))
                 .andExpect(jsonPath("$.items[0].status").value("PENDING"));
 
         mockMvc.perform(get("/api/v1/dash/escalations/{id}", escalationId)
                         .header("Authorization", "Bearer " + escalationsJwt))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(escalationId.toString()))
+                .andExpect(jsonPath("$.requester_email").value("oleh.pona@company.com"))
+                .andExpect(jsonPath("$.question_text").value("How to get internet compensation?"))
+                .andExpect(jsonPath("$.source_references[0].document_id").value("doc-456"))
                 .andExpect(jsonPath("$.status_history[0].to_status").value("PENDING"));
 
         mockMvc.perform(patch("/api/v1/dash/escalations/{id}/status", escalationId)

@@ -1,5 +1,6 @@
 package com.anything_but_dotnet.copilot.dto.dashboard;
 
+import com.anything_but_dotnet.copilot.dto.Citation;
 import com.anything_but_dotnet.copilot.entity.Escalation;
 import com.anything_but_dotnet.copilot.entity.EscalationStatusHistory;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
@@ -27,6 +28,14 @@ public interface DashboardEscalationDto {
             @NotBlank
             @JsonProperty("query_id")
             String queryId,
+
+            @NotBlank
+            @JsonProperty("requester_email")
+            String requesterEmail,
+
+            @NotBlank
+            @JsonProperty("question_text")
+            String questionText,
 
             @NotNull
             @JsonProperty("status")
@@ -56,6 +65,8 @@ public interface DashboardEscalationDto {
             return new EscalationItem(
                     escalation.getId(),
                     escalation.getQueryId(),
+                    escalation.getRequesterEmail(),
+                    escalation.getQuestionText(),
                     escalation.getStatus(),
                     diag != null ? diag.getChannel() : null,
                     diag != null ? diag.getReasonCode() : null,
@@ -106,6 +117,18 @@ public interface DashboardEscalationDto {
             @JsonProperty("query_id")
             String queryId,
 
+            @NotBlank
+            @JsonProperty("requester_email")
+            String requesterEmail,
+
+            @NotBlank
+            @JsonProperty("question_text")
+            String questionText,
+
+            @NotNull
+            @JsonProperty("source_references")
+            List<Citation> sourceReferences,
+
             @NotNull
             @JsonProperty("status")
             EscalationStatus status,
@@ -137,11 +160,15 @@ public interface DashboardEscalationDto {
         public static EscalationDetail from(
                 Escalation escalation,
                 GenerationDiagnostics diag,
+                List<Citation> sourceReferences,
                 List<EscalationStatusHistory> history
         ) {
             return new EscalationDetail(
                     escalation.getId(),
                     escalation.getQueryId(),
+                    escalation.getRequesterEmail(),
+                    escalation.getQuestionText(),
+                    sourceReferences != null ? sourceReferences : List.of(),
                     escalation.getStatus(),
                     diag != null ? diag.getChannel() : null,
                     diag != null ? diag.getReasonCode() : null,

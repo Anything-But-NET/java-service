@@ -7,6 +7,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.annotations.JdbcType;
 import org.hibernate.dialect.type.PostgreSQLEnumJdbcType;
 
@@ -22,6 +23,16 @@ public class Escalation {
 
     @Column(name = "query_id", nullable = false, unique = true)
     private String queryId;
+
+    @Column(name = "requester_email", nullable = false)
+    private String requesterEmail;
+
+    @Column(name = "question_text", nullable = false, columnDefinition = "text")
+    private String questionText;
+
+    @Column(name = "source_references", nullable = false, columnDefinition = "jsonb")
+    @ColumnTransformer(write = "?::jsonb")
+    private String sourceReferences;
 
     @Enumerated(EnumType.STRING)
     @JdbcType(PostgreSQLEnumJdbcType.class)
@@ -39,16 +50,42 @@ public class Escalation {
 
     protected Escalation() {}
 
-    private Escalation(UUID id, String queryId, EscalationStatus status, Instant createdAt) {
+    private Escalation(
+            UUID id,
+            String queryId,
+            String requesterEmail,
+            String questionText,
+            String sourceReferences,
+            EscalationStatus status,
+            Instant createdAt
+    ) {
         this.id = id;
         this.queryId = queryId;
+        this.requesterEmail = requesterEmail;
+        this.questionText = questionText;
+        this.sourceReferences = (sourceReferences == null || sourceReferences.isBlank()) ? "[]" : sourceReferences;
         this.status = status;
         this.createdAt = createdAt;
         this.updatedAt = createdAt;
     }
 
-    public static Escalation createPending(UUID id, String queryId, Instant createdAt) {
-        return new Escalation(id, queryId, EscalationStatus.PENDING, createdAt);
+    public static Escalation createPending(
+            UUID id,
+            String queryId,
+            String requesterEmail,
+            String questionText,
+            String sourceReferences,
+            Instant createdAt
+    ) {
+        return new Escalation(
+                id,
+                queryId,
+                requesterEmail,
+                questionText,
+                sourceReferences,
+                EscalationStatus.PENDING,
+                createdAt
+        );
     }
 
     public void transitionTo(EscalationStatus targetStatus, Instant now) {
@@ -66,6 +103,9 @@ public class Escalation {
 
     public UUID getId() { return id; }
     public String getQueryId() { return queryId; }
+    public String getRequesterEmail() { return requesterEmail; }
+    public String getQuestionText() { return questionText; }
+    public String getSourceReferences() { return sourceReferences; }
     public EscalationStatus getStatus() { return status; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

@@ -164,7 +164,9 @@ class DashboardServiceTest {
         );
         diag.markEscalated(now);
         UUID escalationId = UUID.randomUUID();
-        Escalation escalation = Escalation.createPending(escalationId, "req-esc", now);
+        Escalation escalation = Escalation.createPending(
+                escalationId, "req-esc", "oleh@company.com", "Need help?", "[]", now
+        );
 
         when(diagnosticsRepository.findAll(any(Specification.class), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(diag)));

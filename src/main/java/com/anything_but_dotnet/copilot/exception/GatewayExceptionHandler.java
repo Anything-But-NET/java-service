@@ -160,6 +160,21 @@ public class GatewayExceptionHandler extends RequestBodyAdviceAdapter {
                 ));
     }
 
+    @ExceptionHandler(EscalationDraftExpiredException.class)
+    public ResponseEntity<GatewayErrorResponse> handleDraftExpiredException(
+            EscalationDraftExpiredException ex,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.GONE)
+                .body(new GatewayErrorResponse(
+                        resolveQueryId(request),
+                        GatewayErrorCode.BAD_REQUEST,
+                        ex.getMessage() != null && !ex.getMessage().isBlank()
+                                ? ex.getMessage()
+                                : "Escalation confirmation window (15m) has expired. Please ask your question again."
+                ));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<GatewayErrorResponse> handleIllegalArgumentException(
             IllegalArgumentException ex,
