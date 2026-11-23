@@ -10,14 +10,17 @@ import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
 import com.anything_but_dotnet.copilot.entity.User;
+import com.anything_but_dotnet.copilot.entity.Escalation;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
+import com.anything_but_dotnet.copilot.model.EscalationStatus;
 import com.anything_but_dotnet.copilot.repository.DocumentMetadataRepository;
 import com.anything_but_dotnet.copilot.repository.DocumentSyncRunRepository;
 import com.anything_but_dotnet.copilot.repository.GenerationDiagnosticsRepository;
 import com.anything_but_dotnet.copilot.repository.UsersRepository;
+import com.anything_but_dotnet.copilot.repository.EscalationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -47,6 +50,8 @@ class DashboardServiceTest {
     @Mock
     private GenerationDiagnosticsService diagnosticsService;
     @Mock
+    private EscalationRepository escalationRepository;
+    @Mock
     private DocumentMetadataRepository documentMetadataRepository;
     @Mock
     private UsersRepository usersRepository;
@@ -59,6 +64,7 @@ class DashboardServiceTest {
                 syncRunRepository,
                 diagnosticsRepository,
                 diagnosticsService,
+                escalationRepository,
                 documentMetadataRepository,
                 usersRepository
         );
@@ -147,5 +153,32 @@ class DashboardServiceTest {
 
         PageResponse<UserAclItem> users = service.getUsers(0, 20);
         assertEquals("oleh@company.com", users.items().getFirst().email());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void enrichesGenerationLogsWithLinkedEscalationStatus() {
+        Instant now = Instant.parse("2026-11-23T10:15:30Z");
+        GenerationDiagnostics diag = GenerationDiagnostics.safeNoAnswer(
+                UUID.randomUUID(), "req-esc", ChatChannel.SLACK, null, 0.25, 1100, null, now
+        );
+        diag.markEscalated(now);
+        UUID escalationId = UUID.randomUUID();
+        Escalation escalation = Escalation.createPending(
+                escalationId, "req-esc", "oleh@company.com", "Need help?", "[]", now
+        );
+
+        when(diagnosticsRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(diag)));
+        when(escalationRepository.findByQueryIdIn(List.of("req-esc")))
+                .thenReturn(List.of(escalation));
+
+        PageResponse<GenerationLogItem> logs = service.getGenerationLogs(
+                0, 20, null, null, GenerationOutcome.ESCALATED, null
+        );
+
+        assertEquals(1, logs.items().size());
+        assertEquals(escalationId, logs.items().getFirst().escalationId());
+        assertEquals(EscalationStatus.PENDING, logs.items().getFirst().resolutionStatus());
     }
 }

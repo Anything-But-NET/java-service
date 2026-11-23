@@ -4,12 +4,17 @@ import com.anything_but_dotnet.copilot.config.SecurityConfig;
 import com.anything_but_dotnet.copilot.dto.Citation;
 import com.anything_but_dotnet.copilot.dto.UserQuestionRequest;
 import com.anything_but_dotnet.copilot.dto.UserQuestionResponse;
+import com.anything_but_dotnet.copilot.dto.EscalationResponse;
 import com.anything_but_dotnet.copilot.exception.GatewayExceptionHandler;
 import com.anything_but_dotnet.copilot.exception.RagGenerationException;
+import com.anything_but_dotnet.copilot.exception.NotFoundException;
+import com.anything_but_dotnet.copilot.exception.EscalationDraftExpiredException;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.QuestionStatus;
+import com.anything_but_dotnet.copilot.model.EscalationStatus;
 import com.anything_but_dotnet.copilot.security.JwtService;
 import com.anything_but_dotnet.copilot.service.RagGenerationOrchestrator;
+import com.anything_but_dotnet.copilot.service.EscalationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -20,6 +25,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.time.Instant;
+import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -36,6 +43,9 @@ class GenerationControllerTest {
 
     @MockitoBean
     private RagGenerationOrchestrator ragGenerationOrchestrator;
+
+    @MockitoBean
+    private EscalationService escalationService;
 
     @MockitoBean
     private JwtService jwtService;
@@ -149,5 +159,84 @@ class GenerationControllerTest {
                 .andExpect(jsonPath("$.query_id").value("req-123"))
                 .andExpect(jsonPath("$.error_code").value("INTERNAL_ERROR"))
                 .andExpect(jsonPath("$.user_message").value("An unexpected error occurred while processing your request."));
+    }
+
+    @Test
+    void shouldCreateOrReturnEscalationIdempotentlyWithoutAuth() throws Exception {
+        UUID escalationId = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
+        Instant now = Instant.parse("2026-11-23T10:15:30Z");
+        when(escalationService.createOrGet("req-123"))
+                .thenReturn(new EscalationResponse(escalationId, "req-123", EscalationStatus.PENDING, now, now));
+
+        mockMvc.perform(post("/api/v1/chat/escalations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query_id": "req-123"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.escalation_id").value(escalationId.toString()))
+                .andExpect(jsonPath("$.query_id").value("req-123"))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.created_at").value("2026-11-23T10:15:30Z"))
+                .andExpect(jsonPath("$.updated_at").value("2026-11-23T10:15:30Z"));
+    }
+
+    @Test
+    void shouldReturn404WhenEscalatingUnknownQueryId() throws Exception {
+        when(escalationService.createOrGet("req-missing"))
+                .thenThrow(new NotFoundException("Question not found for the provided query_id."));
+
+        mockMvc.perform(post("/api/v1/chat/escalations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query_id": "req-missing"}
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.query_id").value("req-missing"))
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void shouldReturn400WhenEscalationRequestInvalidOrFailedQuery() throws Exception {
+        mockMvc.perform(post("/api/v1/chat/escalations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query_id": ""}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
+
+        when(escalationService.createOrGet("req-failed"))
+                .thenThrow(new IllegalArgumentException("Cannot escalate a failed question request."));
+
+        mockMvc.perform(post("/api/v1/chat/escalations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query_id": "req-failed"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.query_id").value("req-failed"))
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.user_message").value("Cannot escalate a failed question request."));
+    }
+
+    @Test
+    void shouldReturn410GoneWhenEscalationDraftHasExpired() throws Exception {
+        when(escalationService.createOrGet("req-expired"))
+                .thenThrow(new EscalationDraftExpiredException(
+                        "Escalation confirmation window (15m) has expired. Please ask your question again."
+                ));
+
+        mockMvc.perform(post("/api/v1/chat/escalations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query_id": "req-expired"}
+                                """))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.query_id").value("req-expired"))
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.user_message").value(
+                        "Escalation confirmation window (15m) has expired. Please ask your question again."
+                ));
     }
 }

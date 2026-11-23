@@ -48,7 +48,7 @@ public class SecurityConfig {
                         .accessDeniedHandler(securityHandlers)
                 )
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.POST, "/api/v1/chat/question").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/chat/question", "/api/v1/chat/escalations").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/dash/auth/login", "/api/v1/dash/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/internal/auth/introspect").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
@@ -58,6 +58,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/dash/documents/**").hasAuthority(DashboardOperatorAuthority.METADATA.getAuthority())
                         .requestMatchers(HttpMethod.GET, "/api/v1/dash/users/**").hasAuthority(DashboardOperatorAuthority.USERS.getAuthority())
                         .requestMatchers("/api/v1/dash/operators/**").hasAuthority(DashboardOperatorAuthority.OPERATORS.getAuthority())
+                        .requestMatchers("/api/v1/dash/escalations/**").hasAnyAuthority(DashboardOperatorAuthority.ESCALATIONS.getAuthority(), DashboardOperatorAuthority.OPERATORS.getAuthority())
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)

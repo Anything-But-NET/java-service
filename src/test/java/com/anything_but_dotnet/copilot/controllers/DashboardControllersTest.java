@@ -10,6 +10,10 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.Quest
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.IngestionLogItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.OperatorItem;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationDetail;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationItem;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationStatusHistoryItem;
+import com.anything_but_dotnet.copilot.dto.Citation;
 import com.anything_but_dotnet.copilot.exception.DashboardExceptionHandler;
 import com.anything_but_dotnet.copilot.exception.NotFoundException;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
@@ -17,11 +21,14 @@ import com.anything_but_dotnet.copilot.model.DashboardOperatorAuthority;
 import com.anything_but_dotnet.copilot.model.DashboardOperatorStatus;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
+import com.anything_but_dotnet.copilot.model.EscalationStatus;
+import com.anything_but_dotnet.copilot.model.QuestionOutcomeReasonCode;
 import com.anything_but_dotnet.copilot.security.AuthFilter;
 import com.anything_but_dotnet.copilot.security.JwtService;
 import com.anything_but_dotnet.copilot.security.OperatorDetailsImpl;
 import com.anything_but_dotnet.copilot.service.DashboardOperatorService;
 import com.anything_but_dotnet.copilot.service.DashboardService;
+import com.anything_but_dotnet.copilot.service.EscalationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -84,6 +91,9 @@ class DashboardControllersTest {
 
     @MockitoBean
     private DashboardService dashboardService;
+
+    @MockitoBean
+    private EscalationService escalationService;
 
     @Test
     void loginReturnsAccessAndRefreshTokensForActiveOperator() throws Exception {
@@ -407,5 +417,141 @@ class DashboardControllersTest {
                 .getStatus();
         org.junit.jupiter.api.Assertions.assertNotEquals(401, subPathStatus);
         org.junit.jupiter.api.Assertions.assertNotEquals(403, subPathStatus);
+    }
+
+    @Test
+    void escalationEndpointsEnforceRbacAndSupportLifecycleTransitions() throws Exception {
+        UUID escalationId = UUID.randomUUID();
+        Instant now = Instant.parse("2026-11-23T10:15:30Z");
+
+        EscalationItem item = new EscalationItem(
+                escalationId,
+                "req-123",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
+                EscalationStatus.PENDING,
+                ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.LOW_CONFIDENCE,
+                0.31,
+                now,
+                now,
+                null
+        );
+        EscalationDetail detail = new EscalationDetail(
+                escalationId,
+                "req-123",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
+                List.of(new Citation(
+                        "IT Compensation Guidelines",
+                        "https://company.sharepoint.com/docs/it-comp",
+                        "doc-456",
+                        "123e4567-e89b-12d3-a456-426614174000",
+                        0.42
+                )),
+                EscalationStatus.IN_PROGRESS,
+                ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.LOW_CONFIDENCE,
+                0.31,
+                now,
+                now.plusSeconds(30),
+                null,
+                List.of(new EscalationStatusHistoryItem(
+                        UUID.randomUUID(),
+                        null,
+                        EscalationStatus.PENDING,
+                        null,
+                        now
+                ))
+        );
+        EscalationItem updated = new EscalationItem(
+                escalationId,
+                "req-123",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
+                EscalationStatus.IN_PROGRESS,
+                ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.LOW_CONFIDENCE,
+                0.31,
+                now,
+                now.plusSeconds(30),
+                null
+        );
+
+        when(escalationService.getEscalations(eq(0), eq(20), any(), any(), eq(EscalationStatus.PENDING), eq("req-123")))
+                .thenReturn(new PageResponse<>(List.of(item), 0, 20, 1L, 1));
+        when(escalationService.getEscalationById(escalationId)).thenReturn(detail);
+        when(escalationService.updateStatus(escalationId, EscalationStatus.IN_PROGRESS, "expert@company.com"))
+                .thenReturn(updated);
+
+        String escalationsJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "expert@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.ESCALATIONS)
+        ));
+        String operatorsJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "ops@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.OPERATORS)
+        ));
+        String logsOnlyJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "logs@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.LOGS)
+        ));
+
+        // ESCALATIONS authority can list, view detail, and transition status
+        mockMvc.perform(get("/api/v1/dash/escalations")
+                        .header("Authorization", "Bearer " + escalationsJwt)
+                        .param("status", "PENDING")
+                        .param("query_id", "req-123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(escalationId.toString()))
+                .andExpect(jsonPath("$.items[0].query_id").value("req-123"))
+                .andExpect(jsonPath("$.items[0].requester_email").value("oleh.pona@company.com"))
+                .andExpect(jsonPath("$.items[0].question_text").value("How to get internet compensation?"))
+                .andExpect(jsonPath("$.items[0].status").value("PENDING"));
+
+        mockMvc.perform(get("/api/v1/dash/escalations/{id}", escalationId)
+                        .header("Authorization", "Bearer " + escalationsJwt))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(escalationId.toString()))
+                .andExpect(jsonPath("$.requester_email").value("oleh.pona@company.com"))
+                .andExpect(jsonPath("$.question_text").value("How to get internet compensation?"))
+                .andExpect(jsonPath("$.source_references[0].document_id").value("doc-456"))
+                .andExpect(jsonPath("$.status_history[0].to_status").value("PENDING"));
+
+        mockMvc.perform(patch("/api/v1/dash/escalations/{id}/status", escalationId)
+                        .header("Authorization", "Bearer " + escalationsJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status": "IN_PROGRESS"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
+
+        // OPERATORS authority also has access for backward compatibility
+        mockMvc.perform(get("/api/v1/dash/escalations/{id}", escalationId)
+                        .header("Authorization", "Bearer " + operatorsJwt))
+                .andExpect(status().isOk());
+
+        // LOGS-only operator is forbidden
+        mockMvc.perform(get("/api/v1/dash/escalations")
+                        .header("Authorization", "Bearer " + logsOnlyJwt))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("FORBIDDEN"));
+
+        // Invalid transition returns 400 BAD_REQUEST
+        when(escalationService.updateStatus(escalationId, EscalationStatus.CLOSED, "expert@company.com"))
+                .thenThrow(new IllegalArgumentException("Invalid escalation status transition from PENDING to CLOSED."));
+
+        mockMvc.perform(patch("/api/v1/dash/escalations/{id}/status", escalationId)
+                        .header("Authorization", "Bearer " + escalationsJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status": "CLOSED"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
     }
 }

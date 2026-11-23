@@ -33,6 +33,7 @@ class RagGenerationOrchestratorTest {
     private GenerationDiagnosticsService diagnosticsService;
     private DocumentMetadataService documentMetadataService;
     private UsersService usersService;
+    private EscalationService escalationService;
     private RagGenerationOrchestrator orchestrator;
 
     private final UUID promptVersionId = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
@@ -43,7 +44,10 @@ class RagGenerationOrchestratorTest {
         diagnosticsService = mock(GenerationDiagnosticsService.class);
         documentMetadataService = mock(DocumentMetadataService.class);
         usersService = mock(UsersService.class);
-        orchestrator = new RagGenerationOrchestrator(httpClient, diagnosticsService, documentMetadataService, usersService);
+        escalationService = mock(EscalationService.class);
+        orchestrator = new RagGenerationOrchestrator(
+                httpClient, diagnosticsService, documentMetadataService, usersService, escalationService
+        );
     }
 
     @Test
@@ -161,7 +165,7 @@ class RagGenerationOrchestratorTest {
     }
 
     @Test
-    void shouldGenerateAnsweredResponseWithEnrichedCitations() {
+    void shouldGenerateAnsweredResponseWithEnrichedCitationsAndSaveEscalationDraft() {
         UserQuestionRequest userRequest = new UserQuestionRequest(
                 "req-123",
                 ChatChannel.TEAMS,
@@ -201,11 +205,14 @@ class RagGenerationOrchestratorTest {
         assertEquals(enrichedCitations, response.citations());
         verify(usersService).getUserGroups("oleh.pona@company.com");
         verify(documentMetadataService).enrichCitations(ragCitations);
+        verify(escalationService).saveDraft(
+                "req-123", "oleh.pona@company.com", "How to get internet compensation?", enrichedCitations
+        );
         verify(diagnosticsService).recordAnswered(eq("req-123"), eq(ChatChannel.TEAMS), eq(0.89), anyInt(), eq(promptVersionId));
     }
 
     @Test
-    void shouldRecordSafeNoAnswerWithEmptyRetrievalWithoutEnrichingCitations() {
+    void shouldRecordSafeNoAnswerWithEmptyRetrievalAndSaveDraftWithoutEnrichingCitations() {
         UserQuestionRequest userRequest = new UserQuestionRequest(
                 "req-123",
                 ChatChannel.SLACK,
@@ -228,6 +235,9 @@ class RagGenerationOrchestratorTest {
         assertEquals(QuestionStatus.ESCALATED_TO_EXPERT, response.status());
         assertTrue(response.citations().isEmpty());
         verifyNoInteractions(documentMetadataService);
+        verify(escalationService).saveDraft(
+                "req-123", "oleh.pona@company.com", "How to get internet compensation?", List.of()
+        );
         verify(diagnosticsService).recordSafeNoAnswer(
                 eq("req-123"), eq(ChatChannel.SLACK), eq(QuestionOutcomeReasonCode.EMPTY_RETRIEVAL),
                 eq(0.0), anyInt(), eq(promptVersionId)
@@ -235,12 +245,25 @@ class RagGenerationOrchestratorTest {
     }
 
     @Test
-    void shouldRecordSafeNoAnswerWithLowConfidenceWithoutEnrichingCitations() {
+    void shouldRecordSafeNoAnswerWithLowConfidenceAndSaveDraftWithEnrichedCitations() {
         UserQuestionRequest userRequest = new UserQuestionRequest(
                 "req-123",
                 ChatChannel.TEAMS,
                 "oleh.pona@company.com",
                 "How to get internet compensation?"
+        );
+
+        List<RagCitation> ragCitations = List.of(
+                new RagCitation("doc-789", "987e6543-e21b-12d3-a456-426614174999", 0.42)
+        );
+        List<Citation> enrichedCitations = List.of(
+                new Citation(
+                        "Compensation FAQ",
+                        "https://company.sharepoint.com/docs/faq",
+                        "doc-789",
+                        "987e6543-e21b-12d3-a456-426614174999",
+                        0.42
+                )
         );
 
         when(httpClient.generateAnswer(any())).thenReturn(new RagRetrievalResponse(
@@ -249,15 +272,19 @@ class RagGenerationOrchestratorTest {
                 "Partial uncertain answer...",
                 0.35,
                 promptVersionId,
-                List.of(new RagCitation("doc-789", "987e6543-e21b-12d3-a456-426614174999", 0.42))
+                ragCitations
         ));
+        when(documentMetadataService.enrichCitations(ragCitations)).thenReturn(enrichedCitations);
 
         UserQuestionResponse response = orchestrator.generateUserQuestions(userRequest);
 
         assertEquals("req-123", response.queryId());
         assertEquals(QuestionStatus.ESCALATED_TO_EXPERT, response.status());
         assertTrue(response.citations().isEmpty());
-        verifyNoInteractions(documentMetadataService);
+        verify(documentMetadataService).enrichCitations(ragCitations);
+        verify(escalationService).saveDraft(
+                "req-123", "oleh.pona@company.com", "How to get internet compensation?", enrichedCitations
+        );
         verify(diagnosticsService).recordSafeNoAnswer(
                 eq("req-123"), eq(ChatChannel.TEAMS), eq(QuestionOutcomeReasonCode.LOW_CONFIDENCE),
                 eq(0.35), anyInt(), eq(promptVersionId)

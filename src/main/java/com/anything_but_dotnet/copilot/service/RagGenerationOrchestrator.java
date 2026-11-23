@@ -30,15 +30,18 @@ public class RagGenerationOrchestrator {
     private final GenerationDiagnosticsService diagnosticsService;
     private final DocumentMetadataService documentMetadataService;
     private final UsersService usersService;
+    private final EscalationService escalationService;
 
     public RagGenerationOrchestrator(RagHttpClient ragHttpClient,
                                      GenerationDiagnosticsService diagnosticsService,
                                      DocumentMetadataService documentMetadataService,
-                                     UsersService usersService) {
+                                     UsersService usersService,
+                                     EscalationService escalationService) {
         this.ragHttpClient = ragHttpClient;
         this.diagnosticsService = diagnosticsService;
         this.documentMetadataService = documentMetadataService;
         this.usersService = usersService;
+        this.escalationService = escalationService;
     }
 
     public UserQuestionResponse generateUserQuestions(UserQuestionRequest request) {
@@ -49,6 +52,14 @@ public class RagGenerationOrchestrator {
                 request.channel()
         );
 
+        List<Citation> enrichedCitations = (result.citations() != null && !result.citations().isEmpty())
+                ? documentMetadataService.enrichCitations(result.citations())
+                : List.of();
+
+        if (isEscalatableStatus(result.status())) {
+            saveEscalationDraftSafe(request.queryId(), request.userEmail(), request.query(), enrichedCitations);
+        }
+
         if (result.status() != GenerationStatus.ANSWER_GENERATED) {
             return new UserQuestionResponse(
                     request.queryId(),
@@ -57,8 +68,6 @@ public class RagGenerationOrchestrator {
                     List.of()
             );
         }
-
-        var enrichedCitations = documentMetadataService.enrichCitations(result.citations());
 
         return new UserQuestionResponse(
                 request.queryId(),
@@ -109,6 +118,25 @@ public class RagGenerationOrchestrator {
         }
     }
 
+    private boolean isEscalatableStatus(GenerationStatus status) {
+        return status == GenerationStatus.ANSWER_GENERATED
+                || status == GenerationStatus.LOW_CONFIDENCE
+                || status == GenerationStatus.EMPTY_RETRIEVAL;
+    }
+
+    private void saveEscalationDraftSafe(
+            String queryId,
+            String requesterEmail,
+            String questionText,
+            List<Citation> enrichedCitations
+    ) {
+        try {
+            escalationService.saveDraft(queryId, requesterEmail, questionText, enrichedCitations);
+        } catch (Exception ex) {
+            logger.warn("Failed to save temporary escalation draft for query {}", queryId, ex);
+        }
+    }
+
     private int elapsedMillis(long startNanos) {
         return Math.max(0, (int) Duration.ofNanos(System.nanoTime() - startNanos).toMillis());
     }
@@ -117,8 +145,8 @@ public class RagGenerationOrchestrator {
         Throwable cause = e.getCause();
         while (cause != null) {
             if (cause instanceof SocketTimeoutException ||
-                cause instanceof HttpTimeoutException ||
-                (cause.getMessage() != null && cause.getMessage().toLowerCase().contains("timed out"))) {
+                    cause instanceof HttpTimeoutException ||
+                    (cause.getMessage() != null && cause.getMessage().toLowerCase().contains("timed out"))) {
                 return true;
             }
             cause = cause.getCause();

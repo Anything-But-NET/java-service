@@ -3,6 +3,7 @@ package com.anything_but_dotnet.copilot.exception;
 import com.anything_but_dotnet.copilot.controllers.GenerationController;
 import com.anything_but_dotnet.copilot.dto.GatewayErrorResponse;
 import com.anything_but_dotnet.copilot.dto.UserQuestionRequest;
+import com.anything_but_dotnet.copilot.dto.CreateEscalationRequest;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GatewayErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
@@ -40,7 +41,8 @@ public class GatewayExceptionHandler extends RequestBodyAdviceAdapter {
             Type targetType,
             Class<? extends HttpMessageConverter<?>> converterType
     ) {
-        return UserQuestionRequest.class.equals(targetType);
+        return UserQuestionRequest.class.equals(targetType)
+                || CreateEscalationRequest.class.equals(targetType);
     }
 
     @Override
@@ -51,10 +53,16 @@ public class GatewayExceptionHandler extends RequestBodyAdviceAdapter {
             Type targetType,
             Class<? extends HttpMessageConverter<?>> converterType
     ) {
-        if (body instanceof UserQuestionRequest request && request.queryId() != null && !request.queryId().isBlank()) {
+        String queryId = null;
+        if (body instanceof UserQuestionRequest request) {
+            queryId = request.queryId();
+        } else if (body instanceof CreateEscalationRequest request) {
+            queryId = request.queryId();
+        }
+        if (queryId != null && !queryId.isBlank()) {
             RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
             if (attrs != null) {
-                attrs.setAttribute(QUERY_ID_ATTRIBUTE, request.queryId(), RequestAttributes.SCOPE_REQUEST);
+                attrs.setAttribute(QUERY_ID_ATTRIBUTE, queryId, RequestAttributes.SCOPE_REQUEST);
             }
         }
         return body;
@@ -66,9 +74,12 @@ public class GatewayExceptionHandler extends RequestBodyAdviceAdapter {
             HttpServletRequest request
     ) {
         String queryId = resolveQueryId(request);
-        if (queryId == null && ex.getBindingResult().getTarget() instanceof UserQuestionRequest target) {
-            if (target.queryId() != null && !target.queryId().isBlank()) {
-                queryId = target.queryId();
+        if (queryId == null) {
+            Object target = ex.getBindingResult().getTarget();
+            if (target instanceof UserQuestionRequest req && req.queryId() != null && !req.queryId().isBlank()) {
+                queryId = req.queryId();
+            } else if (target instanceof CreateEscalationRequest req && req.queryId() != null && !req.queryId().isBlank()) {
+                queryId = req.queryId();
             }
         }
 
@@ -134,6 +145,51 @@ public class GatewayExceptionHandler extends RequestBodyAdviceAdapter {
                 ));
     }
 
+    @ExceptionHandler(NotFoundException.class)
+    public ResponseEntity<GatewayErrorResponse> handleNotFoundException(
+            NotFoundException ex,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new GatewayErrorResponse(
+                        resolveQueryId(request),
+                        GatewayErrorCode.BAD_REQUEST,
+                        ex.getMessage() != null && !ex.getMessage().isBlank()
+                                ? ex.getMessage()
+                                : "Question not found for the provided query_id."
+                ));
+    }
+
+    @ExceptionHandler(EscalationDraftExpiredException.class)
+    public ResponseEntity<GatewayErrorResponse> handleDraftExpiredException(
+            EscalationDraftExpiredException ex,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.GONE)
+                .body(new GatewayErrorResponse(
+                        resolveQueryId(request),
+                        GatewayErrorCode.BAD_REQUEST,
+                        ex.getMessage() != null && !ex.getMessage().isBlank()
+                                ? ex.getMessage()
+                                : "Escalation confirmation window (15m) has expired. Please ask your question again."
+                ));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<GatewayErrorResponse> handleIllegalArgumentException(
+            IllegalArgumentException ex,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new GatewayErrorResponse(
+                        resolveQueryId(request),
+                        GatewayErrorCode.BAD_REQUEST,
+                        ex.getMessage() != null && !ex.getMessage().isBlank()
+                                ? ex.getMessage()
+                                : BAD_REQUEST_MESSAGE
+                ));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<GatewayErrorResponse> handleUnexpectedException(
             Exception ex,
@@ -146,6 +202,7 @@ public class GatewayExceptionHandler extends RequestBodyAdviceAdapter {
                         INTERNAL_ERROR_MESSAGE
                 ));
     }
+
 
     private String resolveQueryId(HttpServletRequest request) {
         Object attr = request.getAttribute(QUERY_ID_ATTRIBUTE);
