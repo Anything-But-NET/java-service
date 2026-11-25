@@ -1,5 +1,6 @@
 package com.anything_but_dotnet.copilot.service;
 
+import com.anything_but_dotnet.copilot.config.EscalationProperties;
 import com.anything_but_dotnet.copilot.dto.Citation;
 import com.anything_but_dotnet.copilot.dto.EscalationResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
@@ -19,12 +20,16 @@ import com.anything_but_dotnet.copilot.repository.EscalationDraftRepository;
 import com.anything_but_dotnet.copilot.repository.EscalationRepository;
 import com.anything_but_dotnet.copilot.repository.EscalationStatusHistoryRepository;
 import com.anything_but_dotnet.copilot.repository.GenerationDiagnosticsRepository;
+import com.anything_but_dotnet.copilot.service.escalation.DatabaseQueueEscalationDestination;
+import com.anything_but_dotnet.copilot.service.escalation.EscalationDestinationResolver;
+import com.anything_but_dotnet.copilot.service.escalation.EscalationRecordContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -50,7 +55,7 @@ import java.util.stream.Collectors;
 public class EscalationService {
 
     private static final Logger logger = LoggerFactory.getLogger(EscalationService.class);
-    public static final Duration DRAFT_TTL = Duration.ofMinutes(15);
+    public static final Duration DRAFT_TTL = EscalationProperties.DEFAULT_DRAFT_TTL;
     private static final TypeReference<List<Citation>> CITATION_LIST_TYPE = new TypeReference<>() {};
 
     private final EscalationRepository escalationRepository;
@@ -62,6 +67,8 @@ public class EscalationService {
     private final Clock clock;
     private final ObjectMapper objectMapper;
     private final TransactionOperations transactionOperations;
+    private final EscalationProperties escalationProperties;
+    private final EscalationDestinationResolver destinationResolver;
 
     public EscalationService(
             EscalationRepository escalationRepository,
@@ -74,6 +81,38 @@ public class EscalationService {
             ObjectMapper objectMapper,
             TransactionOperations transactionOperations
     ) {
+        this(
+                escalationRepository,
+                draftRepository,
+                historyRepository,
+                diagnosticsRepository,
+                diagnosticsService,
+                operatorRepository,
+                clock,
+                objectMapper,
+                transactionOperations,
+                new EscalationProperties(),
+                new EscalationDestinationResolver(
+                        new EscalationProperties(),
+                        List.of(new DatabaseQueueEscalationDestination())
+                )
+        );
+    }
+
+    @Autowired
+    public EscalationService(
+            EscalationRepository escalationRepository,
+            EscalationDraftRepository draftRepository,
+            EscalationStatusHistoryRepository historyRepository,
+            GenerationDiagnosticsRepository diagnosticsRepository,
+            GenerationDiagnosticsService diagnosticsService,
+            DashboardOperatorRepository operatorRepository,
+            Clock clock,
+            ObjectMapper objectMapper,
+            TransactionOperations transactionOperations,
+            EscalationProperties escalationProperties,
+            EscalationDestinationResolver destinationResolver
+    ) {
         this.escalationRepository = escalationRepository;
         this.draftRepository = draftRepository;
         this.historyRepository = historyRepository;
@@ -83,6 +122,8 @@ public class EscalationService {
         this.clock = clock;
         this.objectMapper = objectMapper;
         this.transactionOperations = transactionOperations;
+        this.escalationProperties = escalationProperties;
+        this.destinationResolver = destinationResolver;
     }
 
     @Transactional
@@ -103,7 +144,7 @@ public class EscalationService {
                 questionText,
                 sourceRefsJson,
                 now,
-                now.plus(DRAFT_TTL)
+                now.plus(escalationProperties.getDraftTtl())
         );
         draftRepository.save(draft);
     }
@@ -122,21 +163,27 @@ public class EscalationService {
             throw new IllegalArgumentException("query_id must not be blank.");
         }
 
+        CreationOutcome outcome;
         try {
-            return transactionOperations.execute(status -> createOrGetInTransaction(queryId));
+            outcome = transactionOperations.execute(status -> createOrGetInTransaction(queryId));
         } catch (DataIntegrityViolationException ex) {
             logger.debug("Concurrent escalation insert detected for queryId {}, reading existing record.", queryId);
             return escalationRepository.findByQueryId(queryId)
                     .map(EscalationResponse::from)
                     .orElseThrow(() -> ex);
         }
+
+        if (outcome.createdContext() != null) {
+            deliverToDestinationSafe(outcome.createdContext());
+        }
+        return outcome.response();
     }
 
-    private EscalationResponse createOrGetInTransaction(String queryId) {
+    private CreationOutcome createOrGetInTransaction(String queryId) {
         // 1. Idempotency check first (even if draft has already been deleted/expired)
         Optional<Escalation> existing = escalationRepository.findByQueryId(queryId);
         if (existing.isPresent()) {
-            return EscalationResponse.from(existing.get());
+            return new CreationOutcome(EscalationResponse.from(existing.get()), null);
         }
 
         // 2. Verify question exists and did not fail
@@ -147,14 +194,14 @@ public class EscalationService {
             throw new IllegalArgumentException("Cannot escalate a failed question request.");
         }
 
-        // 3. Fetch active 15m TTL draft
         Instant now = Instant.now(clock);
         EscalationDraft draft = draftRepository.findByQueryIdAndExpiresAtAfter(queryId, now)
                 .orElseThrow(() -> new EscalationDraftExpiredException(
-                        "Escalation confirmation window (15m) has expired. Please ask your question again."
+                        "Escalation confirmation window ("
+                                + formatDraftTtl(escalationProperties.getDraftTtl())
+                                + ") has expired. Please ask your question again."
                 ));
 
-        // 4. Promote draft -> core.escalations, record history, mark escalated, and delete draft atomically
         Escalation escalation = Escalation.createPending(
                 UUID.randomUUID(),
                 queryId,
@@ -177,7 +224,48 @@ public class EscalationService {
         diagnosticsService.markEscalated(queryId);
         draftRepository.delete(draft);
 
-        return EscalationResponse.from(escalation);
+        EscalationRecordContext recordContext = new EscalationRecordContext(
+                escalation.getId(),
+                escalation.getQueryId(),
+                escalation.getRequesterEmail(),
+                escalation.getQuestionText(),
+                deserializeSourceReferences(escalation.getSourceReferences()),
+                diagnostics.getChannel(),
+                diagnostics.getReasonCode(),
+                diagnostics.getConfidenceScore(),
+                escalation.getCreatedAt()
+        );
+
+        return new CreationOutcome(EscalationResponse.from(escalation), recordContext);
+    }
+
+    private void deliverToDestinationSafe(EscalationRecordContext context) {
+        var destination = destinationResolver.resolve();
+        try {
+            destination.deliver(context);
+        } catch (Exception ex) {
+            logger.error(
+                    "Escalation {} persisted for query_id={}, but delivery to destination '{}' failed.",
+                    context.escalationId(),
+                    context.queryId(),
+                    destination.destinationType(),
+                    ex
+            );
+        }
+    }
+
+    private record CreationOutcome(
+            EscalationResponse response,
+            EscalationRecordContext createdContext
+    ) {
+    }
+
+    private String formatDraftTtl(Duration ttl) {
+        long totalSeconds = ttl.getSeconds();
+        if (totalSeconds >= 60 && totalSeconds % 60 == 0) {
+            return (totalSeconds / 60) + "m";
+        }
+        return totalSeconds + "s";
     }
 
     @Transactional(readOnly = true)

@@ -1,5 +1,6 @@
 package com.anything_but_dotnet.copilot.service;
 
+import com.anything_but_dotnet.copilot.config.EscalationProperties;
 import com.anything_but_dotnet.copilot.dto.Citation;
 import com.anything_but_dotnet.copilot.dto.EscalationResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
@@ -21,6 +22,9 @@ import com.anything_but_dotnet.copilot.repository.EscalationDraftRepository;
 import com.anything_but_dotnet.copilot.repository.EscalationRepository;
 import com.anything_but_dotnet.copilot.repository.EscalationStatusHistoryRepository;
 import com.anything_but_dotnet.copilot.repository.GenerationDiagnosticsRepository;
+import com.anything_but_dotnet.copilot.service.escalation.EscalationDestination;
+import com.anything_but_dotnet.copilot.service.escalation.EscalationDestinationResolver;
+import com.anything_but_dotnet.copilot.service.escalation.EscalationRecordContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +37,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
@@ -413,5 +418,198 @@ class EscalationServiceTest {
         UUID missingId = UUID.randomUUID();
         when(escalationRepository.findById(missingId)).thenReturn(Optional.empty());
         assertThrows(NotFoundException.class, () -> service.getEscalationById(missingId));
+    }
+
+    @Test
+    void createOrGetDeliversFullQuestionContextToConfiguredDestinationOnce() {
+        EscalationProperties properties = new EscalationProperties();
+        properties.setDestination("custom-desk");
+        properties.setDraftTtl(Duration.ofMinutes(20));
+
+        EscalationDestination customDestination = mock(EscalationDestination.class);
+        when(customDestination.destinationType()).thenReturn("custom-desk");
+        EscalationDestinationResolver resolver = new EscalationDestinationResolver(
+                properties,
+                List.of(customDestination)
+        );
+
+        Clock clock = Clock.fixed(fixedInstant, ZoneId.of("UTC"));
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        EscalationService configuredService = new EscalationService(
+                escalationRepository,
+                draftRepository,
+                historyRepository,
+                diagnosticsRepository,
+                diagnosticsService,
+                operatorRepository,
+                clock,
+                objectMapper,
+                TransactionOperations.withoutTransaction(),
+                properties,
+                resolver
+        );
+
+        GenerationDiagnostics diag = GenerationDiagnostics.safeNoAnswer(
+                UUID.randomUUID(), "req-ctx", ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.LOW_CONFIDENCE, 0.34, 1100, null, fixedInstant.minusSeconds(15)
+        );
+        String refsJson = """
+                [{"title":"VPN Guide","url":"https://company.sharepoint.com/docs/vpn","document_id":"doc-vpn","chunk_id":"123e4567-e89b-12d3-a456-426614174000","score":0.39}]
+                """.trim();
+        EscalationDraft draft = new EscalationDraft(
+                "req-ctx",
+                "employee@company.com",
+                "How do I request VPN access?",
+                refsJson,
+                fixedInstant.minusSeconds(15),
+                fixedInstant.plusSeconds(1185)
+        );
+
+        when(escalationRepository.findByQueryId("req-ctx")).thenReturn(Optional.empty());
+        when(diagnosticsService.findByQueryId("req-ctx")).thenReturn(Optional.of(diag));
+        when(draftRepository.findByQueryIdAndExpiresAtAfter("req-ctx", fixedInstant)).thenReturn(Optional.of(draft));
+
+        EscalationResponse firstResponse = configuredService.createOrGet("req-ctx");
+
+        ArgumentCaptor<EscalationRecordContext> contextCaptor = ArgumentCaptor.forClass(EscalationRecordContext.class);
+        verify(customDestination, times(1)).deliver(contextCaptor.capture());
+
+        EscalationRecordContext delivered = contextCaptor.getValue();
+        assertEquals(firstResponse.escalationId(), delivered.escalationId());
+        assertEquals("req-ctx", delivered.queryId());
+        assertEquals("employee@company.com", delivered.requesterEmail());
+        assertEquals("How do I request VPN access?", delivered.questionText());
+        assertEquals(1, delivered.sourceReferences().size());
+        assertEquals("doc-vpn", delivered.sourceReferences().getFirst().documentId());
+        assertEquals(ChatChannel.SLACK, delivered.channel());
+        assertEquals(QuestionOutcomeReasonCode.LOW_CONFIDENCE, delivered.reasonCode());
+        assertEquals(0.34, delivered.confidenceScore());
+        assertEquals(fixedInstant, delivered.createdAt());
+
+        Escalation persisted = Escalation.createPending(
+                firstResponse.escalationId(),
+                "req-ctx",
+                "employee@company.com",
+                "How do I request VPN access?",
+                refsJson,
+                fixedInstant
+        );
+        when(escalationRepository.findByQueryId("req-ctx")).thenReturn(Optional.of(persisted));
+
+        EscalationResponse replayResponse = configuredService.createOrGet("req-ctx");
+        assertEquals(firstResponse.escalationId(), replayResponse.escalationId());
+        verify(customDestination, times(1)).deliver(any());
+    }
+
+    @Test
+    void saveDraftAndExpiredWindowRespectConfiguredDraftTtl() {
+        EscalationProperties properties = new EscalationProperties();
+        properties.setDraftTtl(Duration.ofMinutes(25));
+
+        EscalationDestination destination = mock(EscalationDestination.class);
+        when(destination.destinationType()).thenReturn(EscalationProperties.DEFAULT_DESTINATION);
+        EscalationDestinationResolver resolver = new EscalationDestinationResolver(properties, List.of(destination));
+
+        Clock clock = Clock.fixed(fixedInstant, ZoneId.of("UTC"));
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        EscalationService configuredService = new EscalationService(
+                escalationRepository,
+                draftRepository,
+                historyRepository,
+                diagnosticsRepository,
+                diagnosticsService,
+                operatorRepository,
+                clock,
+                objectMapper,
+                TransactionOperations.withoutTransaction(),
+                properties,
+                resolver
+        );
+
+        configuredService.saveDraft("req-ttl", "user@company.com", "Question?", List.of());
+
+        ArgumentCaptor<EscalationDraft> draftCaptor = ArgumentCaptor.forClass(EscalationDraft.class);
+        verify(draftRepository).save(draftCaptor.capture());
+        assertEquals(fixedInstant.plus(Duration.ofMinutes(25)), draftCaptor.getValue().getExpiresAt());
+
+        GenerationDiagnostics diag = GenerationDiagnostics.safeNoAnswer(
+                UUID.randomUUID(), "req-ttl", ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.EMPTY_RETRIEVAL, 0.0, 500, null, fixedInstant.minusSeconds(2000)
+        );
+        when(escalationRepository.findByQueryId("req-ttl")).thenReturn(Optional.empty());
+        when(diagnosticsService.findByQueryId("req-ttl")).thenReturn(Optional.of(diag));
+        when(draftRepository.findByQueryIdAndExpiresAtAfter("req-ttl", fixedInstant)).thenReturn(Optional.empty());
+
+        EscalationDraftExpiredException ex = assertThrows(
+                EscalationDraftExpiredException.class,
+                () -> configuredService.createOrGet("req-ttl")
+        );
+        assertTrue(ex.getMessage().contains("25m"));
+        verify(destination, never()).deliver(any());
+    }
+
+    @Test
+    void createOrGetDeliversAfterTransactionAndReturnsPersistedRecordIfDestinationThrows() {
+        EscalationProperties properties = new EscalationProperties();
+        properties.setDestination("external-desk");
+
+        EscalationDestination failingDestination = mock(EscalationDestination.class);
+        when(failingDestination.destinationType()).thenReturn("external-desk");
+        doThrow(new RuntimeException("External destination timeout"))
+                .when(failingDestination).deliver(any());
+
+        EscalationDestinationResolver resolver = new EscalationDestinationResolver(
+                properties,
+                List.of(failingDestination)
+        );
+
+        TransactionOperations trackingTx = mock(TransactionOperations.class);
+        when(trackingTx.execute(any())).thenAnswer(inv -> {
+            org.springframework.transaction.support.TransactionCallback<?> cb = inv.getArgument(0);
+            Object result = cb.doInTransaction(null);
+            verify(failingDestination, never()).deliver(any());
+            return result;
+        });
+
+        Clock clock = Clock.fixed(fixedInstant, ZoneId.of("UTC"));
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        EscalationService configuredService = new EscalationService(
+                escalationRepository,
+                draftRepository,
+                historyRepository,
+                diagnosticsRepository,
+                diagnosticsService,
+                operatorRepository,
+                clock,
+                objectMapper,
+                trackingTx,
+                properties,
+                resolver
+        );
+
+        GenerationDiagnostics diag = GenerationDiagnostics.safeNoAnswer(
+                UUID.randomUUID(), "req-dest-fail", ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.LOW_CONFIDENCE, 0.28, 900, null, fixedInstant.minusSeconds(10)
+        );
+        EscalationDraft draft = new EscalationDraft(
+                "req-dest-fail",
+                "employee@company.com",
+                "Need VPN help",
+                "[]",
+                fixedInstant.minusSeconds(10),
+                fixedInstant.plusSeconds(890)
+        );
+
+        when(escalationRepository.findByQueryId("req-dest-fail")).thenReturn(Optional.empty());
+        when(diagnosticsService.findByQueryId("req-dest-fail")).thenReturn(Optional.of(diag));
+        when(draftRepository.findByQueryIdAndExpiresAtAfter("req-dest-fail", fixedInstant)).thenReturn(Optional.of(draft));
+
+        EscalationResponse response = configuredService.createOrGet("req-dest-fail");
+
+        assertNotNull(response.escalationId());
+        assertEquals("req-dest-fail", response.queryId());
+        assertEquals(EscalationStatus.PENDING, response.status());
+        verify(escalationRepository).saveAndFlush(any(Escalation.class));
+        verify(failingDestination, times(1)).deliver(any(EscalationRecordContext.class));
     }
 }

@@ -30,6 +30,9 @@ app:
   kafka:
     topics:
       ingestion: ${KAFKA_INGESTION_TOPIC:rag.documents.ingestion.v1}
+  escalation:
+    destination: ${ESCALATION_DESTINATION:database}
+    draft-ttl: ${ESCALATION_DRAFT_TTL:15m}
 
 management:
   endpoints:
