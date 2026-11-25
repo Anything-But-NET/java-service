@@ -163,21 +163,27 @@ public class EscalationService {
             throw new IllegalArgumentException("query_id must not be blank.");
         }
 
+        CreationOutcome outcome;
         try {
-            return transactionOperations.execute(status -> createOrGetInTransaction(queryId));
+            outcome = transactionOperations.execute(status -> createOrGetInTransaction(queryId));
         } catch (DataIntegrityViolationException ex) {
             logger.debug("Concurrent escalation insert detected for queryId {}, reading existing record.", queryId);
             return escalationRepository.findByQueryId(queryId)
                     .map(EscalationResponse::from)
                     .orElseThrow(() -> ex);
         }
+
+        if (outcome.createdContext() != null) {
+            deliverToDestinationSafe(outcome.createdContext());
+        }
+        return outcome.response();
     }
 
-    private EscalationResponse createOrGetInTransaction(String queryId) {
+    private CreationOutcome createOrGetInTransaction(String queryId) {
         // 1. Idempotency check first (even if draft has already been deleted/expired)
         Optional<Escalation> existing = escalationRepository.findByQueryId(queryId);
         if (existing.isPresent()) {
-            return EscalationResponse.from(existing.get());
+            return new CreationOutcome(EscalationResponse.from(existing.get()), null);
         }
 
         // 2. Verify question exists and did not fail
@@ -229,9 +235,29 @@ public class EscalationService {
                 diagnostics.getConfidenceScore(),
                 escalation.getCreatedAt()
         );
-        destinationResolver.resolve().deliver(recordContext);
 
-        return EscalationResponse.from(escalation);
+        return new CreationOutcome(EscalationResponse.from(escalation), recordContext);
+    }
+
+    private void deliverToDestinationSafe(EscalationRecordContext context) {
+        var destination = destinationResolver.resolve();
+        try {
+            destination.deliver(context);
+        } catch (Exception ex) {
+            logger.error(
+                    "Escalation {} persisted for query_id={}, but delivery to destination '{}' failed.",
+                    context.escalationId(),
+                    context.queryId(),
+                    destination.destinationType(),
+                    ex
+            );
+        }
+    }
+
+    private record CreationOutcome(
+            EscalationResponse response,
+            EscalationRecordContext createdContext
+    ) {
     }
 
     private String formatDraftTtl(Duration ttl) {

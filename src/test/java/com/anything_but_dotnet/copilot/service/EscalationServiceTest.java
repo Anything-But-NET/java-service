@@ -547,4 +547,69 @@ class EscalationServiceTest {
         assertTrue(ex.getMessage().contains("25m"));
         verify(destination, never()).deliver(any());
     }
+
+    @Test
+    void createOrGetDeliversAfterTransactionAndReturnsPersistedRecordIfDestinationThrows() {
+        EscalationProperties properties = new EscalationProperties();
+        properties.setDestination("external-desk");
+
+        EscalationDestination failingDestination = mock(EscalationDestination.class);
+        when(failingDestination.destinationType()).thenReturn("external-desk");
+        doThrow(new RuntimeException("External destination timeout"))
+                .when(failingDestination).deliver(any());
+
+        EscalationDestinationResolver resolver = new EscalationDestinationResolver(
+                properties,
+                List.of(failingDestination)
+        );
+
+        TransactionOperations trackingTx = mock(TransactionOperations.class);
+        when(trackingTx.execute(any())).thenAnswer(inv -> {
+            org.springframework.transaction.support.TransactionCallback<?> cb = inv.getArgument(0);
+            Object result = cb.doInTransaction(null);
+            verify(failingDestination, never()).deliver(any());
+            return result;
+        });
+
+        Clock clock = Clock.fixed(fixedInstant, ZoneId.of("UTC"));
+        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        EscalationService configuredService = new EscalationService(
+                escalationRepository,
+                draftRepository,
+                historyRepository,
+                diagnosticsRepository,
+                diagnosticsService,
+                operatorRepository,
+                clock,
+                objectMapper,
+                trackingTx,
+                properties,
+                resolver
+        );
+
+        GenerationDiagnostics diag = GenerationDiagnostics.safeNoAnswer(
+                UUID.randomUUID(), "req-dest-fail", ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.LOW_CONFIDENCE, 0.28, 900, null, fixedInstant.minusSeconds(10)
+        );
+        EscalationDraft draft = new EscalationDraft(
+                "req-dest-fail",
+                "employee@company.com",
+                "Need VPN help",
+                "[]",
+                fixedInstant.minusSeconds(10),
+                fixedInstant.plusSeconds(890)
+        );
+
+        when(escalationRepository.findByQueryId("req-dest-fail")).thenReturn(Optional.empty());
+        when(diagnosticsService.findByQueryId("req-dest-fail")).thenReturn(Optional.of(diag));
+        when(draftRepository.findByQueryIdAndExpiresAtAfter("req-dest-fail", fixedInstant)).thenReturn(Optional.of(draft));
+
+        EscalationResponse response = configuredService.createOrGet("req-dest-fail");
+
+        assertNotNull(response.escalationId());
+        assertEquals("req-dest-fail", response.queryId());
+        assertEquals(EscalationStatus.PENDING, response.status());
+        verify(escalationRepository).saveAndFlush(any(Escalation.class));
+        verify(failingDestination, times(1)).deliver(any(EscalationRecordContext.class));
+    }
 }

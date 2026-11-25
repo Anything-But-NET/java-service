@@ -18,11 +18,10 @@ public class DatabaseQueueEscalationDestination implements EscalationDestination
     @Override
     public void deliver(EscalationRecordContext context) {
         logger.info(
-                "Recorded escalation {} for query_id={} in destination '{}' (requester={}, citations={})",
+                "Recorded escalation {} for query_id={} in destination '{}' (citations={})",
                 context.escalationId(),
                 context.queryId(),
                 TYPE,
-                context.requesterEmail(),
                 context.sourceReferences().size()
         );
     }
