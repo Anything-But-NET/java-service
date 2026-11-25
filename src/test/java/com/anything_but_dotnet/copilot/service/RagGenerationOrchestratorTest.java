@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -280,6 +281,7 @@ class RagGenerationOrchestratorTest {
 
         assertEquals("req-123", response.queryId());
         assertEquals(QuestionStatus.ESCALATED_TO_EXPERT, response.status());
+        assertFalse(response.replyText().toLowerCase().contains("created a support ticket"));
         assertTrue(response.citations().isEmpty());
         verify(documentMetadataService).enrichCitations(ragCitations);
         verify(escalationService).saveDraft(
@@ -288,6 +290,41 @@ class RagGenerationOrchestratorTest {
         verify(diagnosticsService).recordSafeNoAnswer(
                 eq("req-123"), eq(ChatChannel.TEAMS), eq(QuestionOutcomeReasonCode.LOW_CONFIDENCE),
                 eq(0.35), anyInt(), eq(promptVersionId)
+        );
+    }
+
+    @Test
+    void shouldStillSaveEscalationDraftWhenCitationEnrichmentFailsOnLowConfidence() {
+        UserQuestionRequest userRequest = new UserQuestionRequest(
+                "req-enrich-fail",
+                ChatChannel.SLACK,
+                "oleh.pona@company.com",
+                "How to get internet compensation?"
+        );
+
+        List<RagCitation> ragCitations = List.of(
+                new RagCitation("doc-789", "987e6543-e21b-12d3-a456-426614174999", 0.42)
+        );
+
+        when(httpClient.generateAnswer(any())).thenReturn(new RagRetrievalResponse(
+                "req-enrich-fail",
+                GenerationStatus.LOW_CONFIDENCE,
+                null,
+                0.35,
+                promptVersionId,
+                ragCitations
+        ));
+        when(documentMetadataService.enrichCitations(ragCitations))
+                .thenThrow(new RuntimeException("Metadata store temporarily unavailable"));
+
+        UserQuestionResponse response = orchestrator.generateUserQuestions(userRequest);
+
+        assertEquals("req-enrich-fail", response.queryId());
+        assertEquals(QuestionStatus.ESCALATED_TO_EXPERT, response.status());
+        assertFalse(response.replyText().toLowerCase().contains("created a support ticket"));
+        assertTrue(response.citations().isEmpty());
+        verify(escalationService).saveDraft(
+                "req-enrich-fail", "oleh.pona@company.com", "How to get internet compensation?", List.of()
         );
     }
 }

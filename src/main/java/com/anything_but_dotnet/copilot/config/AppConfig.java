@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Value;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -18,6 +19,7 @@ import java.time.Clock;
 
 @Configuration
 @EnableScheduling
+@EnableConfigurationProperties(EscalationProperties.class)
 public class AppConfig {
 
     @Bean

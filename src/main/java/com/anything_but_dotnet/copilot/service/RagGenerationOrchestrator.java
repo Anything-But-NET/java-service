@@ -24,7 +24,7 @@ public class RagGenerationOrchestrator {
 
     private static final Logger logger = LoggerFactory.getLogger(RagGenerationOrchestrator.class);
     private static final String ESCALATED_REPLY_TEXT =
-            "I couldn't find a confident answer in the knowledge base. I have created a support ticket for an expert to assist you.";
+            "I couldn't find a confident answer in the knowledge base. Please confirm if you would like to send your question to an expert for review.";
 
     private final RagHttpClient ragHttpClient;
     private final GenerationDiagnosticsService diagnosticsService;
@@ -52,9 +52,14 @@ public class RagGenerationOrchestrator {
                 request.channel()
         );
 
-        List<Citation> enrichedCitations = (result.citations() != null && !result.citations().isEmpty())
-                ? documentMetadataService.enrichCitations(result.citations())
-                : List.of();
+        List<Citation> enrichedCitations;
+        if (result.citations() == null || result.citations().isEmpty()) {
+            enrichedCitations = List.of();
+        } else if (result.status() == GenerationStatus.ANSWER_GENERATED) {
+            enrichedCitations = documentMetadataService.enrichCitations(result.citations());
+        } else {
+            enrichedCitations = enrichCitationsSafe(request.queryId(), result.citations());
+        }
 
         if (isEscalatableStatus(result.status())) {
             saveEscalationDraftSafe(request.queryId(), request.userEmail(), request.query(), enrichedCitations);
@@ -122,6 +127,15 @@ public class RagGenerationOrchestrator {
         return status == GenerationStatus.ANSWER_GENERATED
                 || status == GenerationStatus.LOW_CONFIDENCE
                 || status == GenerationStatus.EMPTY_RETRIEVAL;
+    }
+
+    private List<Citation> enrichCitationsSafe(String queryId, List<RagCitation> citations) {
+        try {
+            return documentMetadataService.enrichCitations(citations);
+        } catch (Exception ex) {
+            logger.warn("Failed to enrich citations for escalation draft of query {}", queryId, ex);
+            return List.of();
+        }
     }
 
     private void saveEscalationDraftSafe(
