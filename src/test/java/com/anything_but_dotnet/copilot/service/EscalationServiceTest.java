@@ -414,4 +414,101 @@ class EscalationServiceTest {
         when(escalationRepository.findById(missingId)).thenReturn(Optional.empty());
         assertThrows(NotFoundException.class, () -> service.getEscalationById(missingId));
     }
+
+    @Test
+    void saveResponsePersistsDraftResolvesWithHistoryAndUpdatesResolvedAnswer() {
+        UUID escalationId = UUID.randomUUID();
+        UUID operatorId = UUID.randomUUID();
+        Escalation escalation = Escalation.createPending(
+                escalationId,
+                "req-answer",
+                "oleh.pona@company.com",
+                "How to request VPN?",
+                "[]",
+                fixedInstant.minusSeconds(120)
+        );
+        DashboardOperator operator = mock(DashboardOperator.class);
+        when(operator.getId()).thenReturn(operatorId);
+
+        when(escalationRepository.findById(escalationId)).thenReturn(Optional.of(escalation));
+        when(operatorRepository.findByEmail("expert@company.com")).thenReturn(Optional.of(operator));
+        when(diagnosticsService.findByQueryId("req-answer")).thenReturn(Optional.empty());
+        when(historyRepository.findByEscalationIdOrderByChangedAtAsc(escalationId)).thenReturn(List.of());
+
+        // 1. Save draft without changing status
+        EscalationDetail draft = service.saveResponse(
+                escalationId,
+                "  Draft answer: open IT portal.  ",
+                null,
+                "expert@company.com"
+        );
+        assertEquals("Draft answer: open IT portal.", draft.resolutionText());
+        assertEquals(EscalationStatus.PENDING, draft.status());
+        assertEquals(operatorId, draft.resolvedByOperatorId());
+        assertEquals(fixedInstant, draft.resolutionUpdatedAt());
+        assertNull(draft.resolvedAt());
+        verify(historyRepository, never()).save(any());
+
+        // 2. Save final answer and transition to RESOLVED
+        EscalationDetail resolved = service.saveResponse(
+                escalationId,
+                "Open the IT portal and submit the VPN access form.",
+                EscalationStatus.RESOLVED,
+                "expert@company.com"
+        );
+        assertEquals("Open the IT portal and submit the VPN access form.", resolved.resolutionText());
+        assertEquals(EscalationStatus.RESOLVED, resolved.status());
+        assertEquals(fixedInstant, resolved.resolvedAt());
+
+        ArgumentCaptor<EscalationStatusHistory> histCaptor = ArgumentCaptor.forClass(EscalationStatusHistory.class);
+        verify(historyRepository, times(1)).save(histCaptor.capture());
+        assertEquals(EscalationStatus.PENDING, histCaptor.getValue().getFromStatus());
+        assertEquals(EscalationStatus.RESOLVED, histCaptor.getValue().getToStatus());
+        assertEquals(operatorId, histCaptor.getValue().getChangedByOperatorId());
+
+        // 3. Edit answer while RESOLVED without inserting duplicate status history
+        EscalationDetail updatedResolved = service.saveResponse(
+                escalationId,
+                "Updated: submit the VPN access form and wait for IT approval.",
+                EscalationStatus.RESOLVED,
+                "expert@company.com"
+        );
+        assertEquals("Updated: submit the VPN access form and wait for IT approval.", updatedResolved.resolutionText());
+        assertEquals(EscalationStatus.RESOLVED, updatedResolved.status());
+        verify(historyRepository, times(1)).save(any());
+    }
+
+    @Test
+    void saveResponseRejectsBlankTextCancellingAndTerminalEscalations() {
+        UUID escalationId = UUID.randomUUID();
+        Escalation escalation = Escalation.createPending(
+                escalationId,
+                "req-invalid-answer",
+                "oleh.pona@company.com",
+                "Question?",
+                "[]",
+                fixedInstant.minusSeconds(60)
+        );
+        when(escalationRepository.findById(escalationId)).thenReturn(Optional.of(escalation));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.saveResponse(escalationId, "   ", EscalationStatus.RESOLVED, "expert@company.com")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.saveResponse(escalationId, "Valid answer", EscalationStatus.CANCELLED, "expert@company.com")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.saveResponse(escalationId, "Valid answer", EscalationStatus.CLOSED, "expert@company.com")
+        );
+
+        escalation.transitionTo(EscalationStatus.CANCELLED, fixedInstant);
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.saveResponse(escalationId, "Valid answer", null, "expert@company.com")
+        );
+        verify(escalationRepository, never()).save(any());
+    }
 }

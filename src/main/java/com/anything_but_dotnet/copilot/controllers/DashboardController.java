@@ -4,6 +4,7 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.Quest
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationDetail;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationItem;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.SaveEscalationResponseRequest;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.UpdateEscalationStatusRequest;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.GenerationLogItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardLogDto.IngestionLogItem;
@@ -28,6 +29,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -122,6 +124,16 @@ public class DashboardController {
     ) {
         String operatorEmail = authentication != null ? authentication.getName() : null;
         return escalationService.updateStatus(id, request.status(), operatorEmail);
+    }
+
+    @PutMapping("/escalations/{id}/response")
+    public EscalationDetail saveEscalationResponse(
+            @PathVariable UUID id,
+            @Valid @RequestBody SaveEscalationResponseRequest request,
+            Authentication authentication
+    ) {
+        String operatorEmail = authentication != null ? authentication.getName() : null;
+        return escalationService.saveResponse(id, request.resolutionText(), request.status(), operatorEmail);
     }
 
     @GetMapping("/documents")

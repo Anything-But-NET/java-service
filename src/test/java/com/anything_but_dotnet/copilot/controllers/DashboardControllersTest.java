@@ -54,6 +54,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -550,6 +551,70 @@ class DashboardControllersTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"status": "CLOSED"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
+
+        UUID operatorId = UUID.randomUUID();
+        EscalationDetail answeredDetail = new EscalationDetail(
+                escalationId,
+                "req-123",
+                "oleh.pona@company.com",
+                "How to get internet compensation?",
+                List.of(),
+                EscalationStatus.RESOLVED,
+                "Submit the IT reimbursement form in the Finance portal.",
+                now.plusSeconds(60),
+                operatorId,
+                ChatChannel.SLACK,
+                QuestionOutcomeReasonCode.LOW_CONFIDENCE,
+                0.31,
+                now,
+                now.plusSeconds(60),
+                now.plusSeconds(60),
+                List.of(new EscalationStatusHistoryItem(
+                        UUID.randomUUID(),
+                        EscalationStatus.IN_PROGRESS,
+                        EscalationStatus.RESOLVED,
+                        operatorId,
+                        now.plusSeconds(60)
+                ))
+        );
+        when(escalationService.saveResponse(
+                escalationId,
+                "Submit the IT reimbursement form in the Finance portal.",
+                EscalationStatus.RESOLVED,
+                "expert@company.com"
+        )).thenReturn(answeredDetail);
+
+        mockMvc.perform(put("/api/v1/dash/escalations/{id}/response", escalationId)
+                        .header("Authorization", "Bearer " + escalationsJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "resolution_text": "Submit the IT reimbursement form in the Finance portal.",
+                                  "status": "RESOLVED"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RESOLVED"))
+                .andExpect(jsonPath("$.resolution_text").value("Submit the IT reimbursement form in the Finance portal."))
+                .andExpect(jsonPath("$.resolved_by_operator_id").value(operatorId.toString()));
+
+        mockMvc.perform(put("/api/v1/dash/escalations/{id}/response", escalationId)
+                        .header("Authorization", "Bearer " + logsOnlyJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resolution_text": "Unauthorized"}
+                                """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("FORBIDDEN"));
+
+        mockMvc.perform(put("/api/v1/dash/escalations/{id}/response", escalationId)
+                        .header("Authorization", "Bearer " + escalationsJwt)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"resolution_text": "   "}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
