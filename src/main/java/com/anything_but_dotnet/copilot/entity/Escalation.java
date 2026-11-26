@@ -39,6 +39,15 @@ public class Escalation {
     @Column(nullable = false)
     private EscalationStatus status;
 
+    @Column(name = "resolution_text", columnDefinition = "text")
+    private String resolutionText;
+
+    @Column(name = "resolution_updated_at")
+    private Instant resolutionUpdatedAt;
+
+    @Column(name = "resolved_by_operator_id")
+    private UUID resolvedByOperatorId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -101,12 +110,38 @@ public class Escalation {
         }
     }
 
+    public void recordResponse(
+            String resolutionText,
+            UUID operatorId,
+            EscalationStatus targetStatus,
+            Instant now
+    ) {
+        if (this.status == EscalationStatus.CLOSED || this.status == EscalationStatus.CANCELLED) {
+            throw new IllegalArgumentException(
+                    "Cannot record a response for a " + this.status + " escalation."
+            );
+        }
+        if (resolutionText == null || resolutionText.isBlank()) {
+            throw new IllegalArgumentException("resolution_text must not be blank.");
+        }
+        this.resolutionText = resolutionText.trim();
+        this.resolutionUpdatedAt = now;
+        this.resolvedByOperatorId = operatorId;
+        this.updatedAt = now;
+        if (targetStatus != null && targetStatus != this.status) {
+            transitionTo(targetStatus, now);
+        }
+    }
+
     public UUID getId() { return id; }
     public String getQueryId() { return queryId; }
     public String getRequesterEmail() { return requesterEmail; }
     public String getQuestionText() { return questionText; }
     public String getSourceReferences() { return sourceReferences; }
     public EscalationStatus getStatus() { return status; }
+    public String getResolutionText() { return resolutionText; }
+    public Instant getResolutionUpdatedAt() { return resolutionUpdatedAt; }
+    public UUID getResolvedByOperatorId() { return resolvedByOperatorId; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getResolvedAt() { return resolvedAt; }

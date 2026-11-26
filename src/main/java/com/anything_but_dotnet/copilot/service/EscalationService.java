@@ -250,9 +250,7 @@ public class EscalationService {
         escalation.transitionTo(targetStatus, now);
         escalationRepository.save(escalation);
 
-        UUID operatorId = (operatorEmail != null && !operatorEmail.isBlank())
-                ? operatorRepository.findByEmail(operatorEmail).map(DashboardOperator::getId).orElse(null)
-                : null;
+        UUID operatorId = resolveOperatorId(operatorEmail);
 
         historyRepository.save(new EscalationStatusHistory(
                 UUID.randomUUID(),
@@ -265,6 +263,49 @@ public class EscalationService {
 
         GenerationDiagnostics diag = diagnosticsService.findByQueryId(escalation.getQueryId()).orElse(null);
         return EscalationItem.from(escalation, diag);
+    }
+
+    @Transactional
+    public EscalationDetail saveResponse(
+            UUID id,
+            String resolutionText,
+            EscalationStatus targetStatus,
+            String operatorEmail
+    ) {
+        if (targetStatus == EscalationStatus.CANCELLED) {
+            throw new IllegalArgumentException("Cannot save an expert response while cancelling an escalation.");
+        }
+        Escalation escalation = escalationRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Escalation not found."));
+
+        EscalationStatus previousStatus = escalation.getStatus();
+        Instant now = Instant.now(clock);
+        UUID operatorId = resolveOperatorId(operatorEmail);
+
+        escalation.recordResponse(resolutionText, operatorId, targetStatus, now);
+        escalationRepository.save(escalation);
+
+        if (escalation.getStatus() != previousStatus) {
+            historyRepository.save(new EscalationStatusHistory(
+                    UUID.randomUUID(),
+                    escalation.getId(),
+                    previousStatus,
+                    escalation.getStatus(),
+                    operatorId,
+                    now
+            ));
+        }
+
+        GenerationDiagnostics diag = diagnosticsService.findByQueryId(escalation.getQueryId()).orElse(null);
+        List<EscalationStatusHistory> history = historyRepository.findByEscalationIdOrderByChangedAtAsc(id);
+        List<Citation> sourceReferences = deserializeSourceReferences(escalation.getSourceReferences());
+        return EscalationDetail.from(escalation, diag, sourceReferences, history);
+    }
+
+    private UUID resolveOperatorId(String operatorEmail) {
+        return (operatorEmail != null && !operatorEmail.isBlank())
+                ? operatorRepository.findByEmail(operatorEmail).map(DashboardOperator::getId).orElse(null)
+                : null;
     }
 
     private String serializeSourceReferences(List<Citation> sourceReferences) {
