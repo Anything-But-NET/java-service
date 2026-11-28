@@ -285,14 +285,18 @@ class EscalationServiceTest {
         EscalationItem inProgress = service.updateStatus(escalationId, EscalationStatus.IN_PROGRESS, "expert@company.com");
         assertEquals(EscalationStatus.IN_PROGRESS, inProgress.status());
         assertNull(inProgress.resolvedAt());
+        assertNull(inProgress.resolutionId());
 
         EscalationItem resolved = service.updateStatus(escalationId, EscalationStatus.RESOLVED, "expert@company.com");
         assertEquals(EscalationStatus.RESOLVED, resolved.status());
         assertEquals(fixedInstant, resolved.resolvedAt());
+        assertNotNull(resolved.resolutionId());
+        UUID stableResolutionId = resolved.resolutionId();
 
         EscalationItem closed = service.updateStatus(escalationId, EscalationStatus.CLOSED, "expert@company.com");
         assertEquals(EscalationStatus.CLOSED, closed.status());
         assertEquals(fixedInstant, closed.resolvedAt());
+        assertEquals(stableResolutionId, closed.resolutionId());
 
         ArgumentCaptor<EscalationStatusHistory> histCaptor = ArgumentCaptor.forClass(EscalationStatusHistory.class);
         verify(historyRepository, times(3)).save(histCaptor.capture());
@@ -437,7 +441,7 @@ class EscalationServiceTest {
         when(diagnosticsService.findByQueryId("req-answer")).thenReturn(Optional.empty());
         when(historyRepository.findByEscalationIdOrderByChangedAtAsc(escalationId)).thenReturn(List.of());
 
-        // 1. Save draft without changing status
+        // 1. Save draft without changing status -> resolutionId is still null
         EscalationDetail draft = service.saveResponse(
                 escalationId,
                 "  Draft answer: open IT portal.  ",
@@ -449,11 +453,10 @@ class EscalationServiceTest {
         assertEquals(operatorId, draft.resolvedByOperatorId());
         assertEquals(fixedInstant, draft.resolutionUpdatedAt());
         assertNull(draft.resolvedAt());
-        assertNotNull(draft.resolutionId());
-        UUID stableResolutionId = draft.resolutionId();
+        assertNull(draft.resolutionId());
         verify(historyRepository, never()).save(any());
 
-        // 2. Save final answer and transition to RESOLVED
+        // 2. Save final answer and transition to RESOLVED -> resolutionId is generated once
         EscalationDetail resolved = service.saveResponse(
                 escalationId,
                 "Open the IT portal and submit the VPN access form.",
@@ -463,7 +466,8 @@ class EscalationServiceTest {
         assertEquals("Open the IT portal and submit the VPN access form.", resolved.resolutionText());
         assertEquals(EscalationStatus.RESOLVED, resolved.status());
         assertEquals(fixedInstant, resolved.resolvedAt());
-        assertEquals(stableResolutionId, resolved.resolutionId());
+        assertNotNull(resolved.resolutionId());
+        UUID stableResolutionId = resolved.resolutionId();
 
         ArgumentCaptor<EscalationStatusHistory> histCaptor = ArgumentCaptor.forClass(EscalationStatusHistory.class);
         verify(historyRepository, times(1)).save(histCaptor.capture());
@@ -471,7 +475,7 @@ class EscalationServiceTest {
         assertEquals(EscalationStatus.RESOLVED, histCaptor.getValue().getToStatus());
         assertEquals(operatorId, histCaptor.getValue().getChangedByOperatorId());
 
-        // 3. Edit answer while RESOLVED without inserting duplicate status history
+        // 3. Edit answer while RESOLVED -> same resolutionId, no duplicate status history
         EscalationDetail updatedResolved = service.saveResponse(
                 escalationId,
                 "Updated: submit the VPN access form and wait for IT approval.",
@@ -509,6 +513,9 @@ class EscalationServiceTest {
                 IllegalArgumentException.class,
                 () -> service.saveResponse(escalationId, "Valid answer", EscalationStatus.CLOSED, "expert@company.com")
         );
+        assertNull(escalation.getResolutionText());
+        assertNull(escalation.getResolutionId());
+        assertNull(escalation.getResolutionUpdatedAt());
 
         escalation.transitionTo(EscalationStatus.CANCELLED, fixedInstant);
         assertThrows(

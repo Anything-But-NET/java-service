@@ -435,6 +435,10 @@ class DashboardControllersTest {
                 "oleh.pona@company.com",
                 "How to get internet compensation?",
                 EscalationStatus.PENDING,
+                null,
+                null,
+                null,
+                null,
                 ChatChannel.SLACK,
                 QuestionOutcomeReasonCode.LOW_CONFIDENCE,
                 0.31,
@@ -455,6 +459,10 @@ class DashboardControllersTest {
                         0.42
                 )),
                 EscalationStatus.IN_PROGRESS,
+                null,
+                null,
+                null,
+                null,
                 ChatChannel.SLACK,
                 QuestionOutcomeReasonCode.LOW_CONFIDENCE,
                 0.31,
@@ -475,6 +483,10 @@ class DashboardControllersTest {
                 "oleh.pona@company.com",
                 "How to get internet compensation?",
                 EscalationStatus.IN_PROGRESS,
+                null,
+                null,
+                null,
+                null,
                 ChatChannel.SLACK,
                 QuestionOutcomeReasonCode.LOW_CONFIDENCE,
                 0.31,
@@ -669,7 +681,7 @@ class DashboardControllersTest {
                         .header("Authorization", "Bearer " + analyticsJwt)
                         .param("from", "2026-11-18T00:00:00Z")
                         .param("to", "2026-11-21T00:00:00Z")
-                        .param("channel", "SLACK"))
+                        .param("channel", "slack"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total_escalations").value(10))
                 .andExpect(jsonPath("$.status_counts[0].status").value("PENDING"))
@@ -710,6 +722,21 @@ class DashboardControllersTest {
         mockMvc.perform(get("/api/v1/dash/analytics/escalations")
                         .header("Authorization", "Bearer " + analyticsJwt)
                         .param("channel", "discord"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
+
+        // Unauthenticated request returns 401 UNAUTHORIZED
+        mockMvc.perform(get("/api/v1/dash/analytics/escalations"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error_code").value("UNAUTHORIZED"));
+
+        // Invalid time range (from > to) returns 400 BAD_REQUEST
+        when(escalationService.getAnalytics(to, from, null))
+                .thenThrow(new IllegalArgumentException("Query parameter 'from' must not be after 'to'."));
+        mockMvc.perform(get("/api/v1/dash/analytics/escalations")
+                        .header("Authorization", "Bearer " + analyticsJwt)
+                        .param("from", "2026-11-21T00:00:00Z")
+                        .param("to", "2026-11-18T00:00:00Z"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
     }

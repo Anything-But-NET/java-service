@@ -28,7 +28,7 @@ WITH filtered AS (
            e.resolved_at,
            CASE
                WHEN e.resolved_at IS NOT NULL
-               THEN GREATEST(0.0, EXTRACT(EPOCH FROM (e.resolved_at - e.created_at)) * 1000.0)
+               THEN GREATEST(0.0, EXTRACT(EPOCH FROM (e.resolved_at - e.created_at)) * 1000.0)::double precision
                ELSE NULL
            END AS resolution_time_ms
     FROM core.escalations e

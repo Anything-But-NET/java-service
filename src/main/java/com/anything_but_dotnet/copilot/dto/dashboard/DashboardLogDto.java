@@ -112,25 +112,6 @@ public interface DashboardLogDto {
             @JsonProperty("updated_at")
             Instant updatedAt
     ) {
-        public GenerationLogItem(
-                UUID id,
-                String queryId,
-                ChatChannel channel,
-                GenerationOutcome outcome,
-                QuestionOutcomeReasonCode reasonCode,
-                ErrorCategory errorCategory,
-                Double confidenceScore,
-                Integer latencyMs,
-                UUID promptVersionId,
-                UUID escalationId,
-                EscalationStatus resolutionStatus,
-                Instant createdAt,
-                Instant updatedAt
-        ) {
-            this(id, queryId, channel, outcome, reasonCode, errorCategory, confidenceScore, latencyMs,
-                    promptVersionId, escalationId, resolutionStatus, null, null, createdAt, updatedAt);
-        }
-
         public static GenerationLogItem from(GenerationDiagnostics diag) {
             return from(diag, null);
         }

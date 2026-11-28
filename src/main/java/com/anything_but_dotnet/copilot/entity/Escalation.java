@@ -108,8 +108,13 @@ public class Escalation {
         }
         this.status = targetStatus;
         this.updatedAt = now;
-        if (targetStatus.marksResolved() && this.resolvedAt == null) {
-            this.resolvedAt = now;
+        if (targetStatus.marksResolved()) {
+            if (this.resolvedAt == null) {
+                this.resolvedAt = now;
+            }
+            if (this.resolutionId == null) {
+                this.resolutionId = UUID.randomUUID();
+            }
         }
     }
 
@@ -127,8 +132,10 @@ public class Escalation {
         if (resolutionText == null || resolutionText.isBlank()) {
             throw new IllegalArgumentException("resolution_text must not be blank.");
         }
-        if (this.resolutionId == null) {
-            this.resolutionId = UUID.randomUUID();
+        if (targetStatus != null && targetStatus != this.status && !this.status.canTransitionTo(targetStatus)) {
+            throw new IllegalArgumentException(
+                    "Invalid escalation status transition from " + this.status + " to " + targetStatus + "."
+            );
         }
         this.resolutionText = resolutionText.trim();
         this.resolutionUpdatedAt = now;
