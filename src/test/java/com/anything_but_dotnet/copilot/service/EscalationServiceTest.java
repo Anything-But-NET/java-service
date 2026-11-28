@@ -5,6 +5,7 @@ import com.anything_but_dotnet.copilot.dto.EscalationResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationDetail;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationItem;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.EscalationAnalyticsResponse;
 import com.anything_but_dotnet.copilot.entity.DashboardOperator;
 import com.anything_but_dotnet.copilot.entity.Escalation;
 import com.anything_but_dotnet.copilot.entity.EscalationDraft;
@@ -35,6 +36,7 @@ import org.springframework.transaction.support.TransactionOperations;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -447,6 +449,8 @@ class EscalationServiceTest {
         assertEquals(operatorId, draft.resolvedByOperatorId());
         assertEquals(fixedInstant, draft.resolutionUpdatedAt());
         assertNull(draft.resolvedAt());
+        assertNotNull(draft.resolutionId());
+        UUID stableResolutionId = draft.resolutionId();
         verify(historyRepository, never()).save(any());
 
         // 2. Save final answer and transition to RESOLVED
@@ -459,6 +463,7 @@ class EscalationServiceTest {
         assertEquals("Open the IT portal and submit the VPN access form.", resolved.resolutionText());
         assertEquals(EscalationStatus.RESOLVED, resolved.status());
         assertEquals(fixedInstant, resolved.resolvedAt());
+        assertEquals(stableResolutionId, resolved.resolutionId());
 
         ArgumentCaptor<EscalationStatusHistory> histCaptor = ArgumentCaptor.forClass(EscalationStatusHistory.class);
         verify(historyRepository, times(1)).save(histCaptor.capture());
@@ -475,6 +480,7 @@ class EscalationServiceTest {
         );
         assertEquals("Updated: submit the VPN access form and wait for IT approval.", updatedResolved.resolutionText());
         assertEquals(EscalationStatus.RESOLVED, updatedResolved.status());
+        assertEquals(stableResolutionId, updatedResolved.resolutionId());
         verify(historyRepository, times(1)).save(any());
     }
 
@@ -510,5 +516,56 @@ class EscalationServiceTest {
                 () -> service.saveResponse(escalationId, "Valid answer", null, "expert@company.com")
         );
         verify(escalationRepository, never()).save(any());
+    }
+
+    @Test
+    void getAnalyticsDeserializesJsonHandlesEmptyAndValidatesRange() {
+        Instant from = Instant.parse("2026-11-18T00:00:00Z");
+        Instant to = Instant.parse("2026-11-21T00:00:00Z");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.getAnalytics(to, from, ChatChannel.SLACK)
+        );
+
+        String analyticsJson = """
+                {
+                  "total_escalations": 10,
+                  "status_counts": [
+                    {"status": "PENDING", "count": 4},
+                    {"status": "RESOLVED", "count": 6}
+                  ],
+                  "resolved_count": 6,
+                  "resolution_rate": 0.6,
+                  "avg_resolution_time_ms": 5400000.0,
+                  "p95_resolution_time_ms": 14400000.0,
+                  "daily_trend": [
+                    {"date": "2026-11-18", "total_escalations": 4, "resolved_count": 2},
+                    {"date": "2026-11-19", "total_escalations": 6, "resolved_count": 4}
+                  ]
+                }
+                """;
+        when(escalationRepository.getAnalyticsJson(from, to, "SLACK")).thenReturn(analyticsJson);
+
+        EscalationAnalyticsResponse analytics = service.getAnalytics(from, to, ChatChannel.SLACK);
+        assertEquals(from, analytics.from());
+        assertEquals(to, analytics.to());
+        assertEquals(10L, analytics.totalEscalations());
+        assertEquals(2, analytics.statusCounts().size());
+        assertEquals(EscalationStatus.PENDING, analytics.statusCounts().get(0).status());
+        assertEquals(6L, analytics.resolvedCount());
+        assertEquals(0.6, analytics.resolutionRate());
+        assertEquals(5400000.0, analytics.avgResolutionTimeMs());
+        assertEquals(14400000.0, analytics.p95ResolutionTimeMs());
+        assertEquals(2, analytics.dailyTrend().size());
+        assertEquals(LocalDate.of(2026, 11, 18), analytics.dailyTrend().get(0).date());
+
+        when(escalationRepository.getAnalyticsJson(from, to, null)).thenReturn(null);
+        EscalationAnalyticsResponse empty = service.getAnalytics(from, to, null);
+        assertEquals(0L, empty.totalEscalations());
+        assertEquals(0L, empty.resolvedCount());
+        assertNull(empty.resolutionRate());
+        assertTrue(empty.statusCounts().isEmpty());
+        assertTrue(empty.dailyTrend().isEmpty());
     }
 }

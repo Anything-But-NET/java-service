@@ -12,6 +12,7 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.Docume
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.OperatorItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.UpdateOperatorStatusRequest;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.UserAclItem;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.EscalationAnalyticsResponse;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.EscalationStatus;
@@ -97,6 +98,15 @@ public class DashboardController {
             @RequestParam(required = false) ChatChannel channel
     ) {
         return dashboardService.getPromptOutcomeAnalytics(promptVersionId, from, to, channel);
+    }
+
+    @GetMapping("/analytics/escalations")
+    public EscalationAnalyticsResponse getEscalationAnalytics(
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @RequestParam(required = false) ChatChannel channel
+    ) {
+        return escalationService.getAnalytics(from, to, channel);
     }
 
     @GetMapping("/escalations")

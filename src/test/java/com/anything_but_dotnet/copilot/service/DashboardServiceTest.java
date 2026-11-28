@@ -24,6 +24,8 @@ import com.anything_but_dotnet.copilot.repository.EscalationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -180,5 +182,42 @@ class DashboardServiceTest {
         assertEquals(1, logs.items().size());
         assertEquals(escalationId, logs.items().getFirst().escalationId());
         assertEquals(EscalationStatus.PENDING, logs.items().getFirst().resolutionStatus());
+        assertNull(logs.items().getFirst().resolutionId());
+        assertNull(logs.items().getFirst().resolvedAt());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void enrichesGenerationLogsWithResolutionIdAndResolvedAtWhenResolved() {
+        Instant createdAt = Instant.parse("2026-11-23T10:15:30Z");
+        Instant resolvedAt = Instant.parse("2026-11-23T11:00:00Z");
+        GenerationDiagnostics diag = GenerationDiagnostics.safeNoAnswer(
+                UUID.randomUUID(), "req-resolved", ChatChannel.SLACK, null, 0.25, 1100, null, createdAt
+        );
+        diag.markEscalated(createdAt);
+
+        UUID escalationId = UUID.randomUUID();
+        UUID operatorId = UUID.randomUUID();
+        Escalation escalation = Escalation.createPending(
+                escalationId, "req-resolved", "oleh@company.com", "Need help?", "[]", createdAt
+        );
+        escalation.recordResponse("Submit the IT reimbursement form.", operatorId, EscalationStatus.RESOLVED, resolvedAt);
+
+        when(diagnosticsRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(diag)));
+        when(escalationRepository.findByQueryIdIn(List.of("req-resolved")))
+                .thenReturn(List.of(escalation));
+
+        PageResponse<GenerationLogItem> logs = service.getGenerationLogs(
+                0, 20, null, null, GenerationOutcome.ESCALATED, null
+        );
+
+        assertEquals(1, logs.items().size());
+        GenerationLogItem item = logs.items().getFirst();
+        assertEquals(escalationId, item.escalationId());
+        assertEquals(EscalationStatus.RESOLVED, item.resolutionStatus());
+        assertNotNull(item.resolutionId());
+        assertEquals(escalation.getResolutionId(), item.resolutionId());
+        assertEquals(resolvedAt, item.resolvedAt());
     }
 }

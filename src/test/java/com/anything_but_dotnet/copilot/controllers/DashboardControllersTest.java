@@ -13,6 +13,9 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.Operat
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationDetail;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationStatusHistoryItem;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.DailyEscalationPoint;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.EscalationAnalyticsResponse;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.EscalationStatusCount;
 import com.anything_but_dotnet.copilot.dto.Citation;
 import com.anything_but_dotnet.copilot.exception.DashboardExceptionHandler;
 import com.anything_but_dotnet.copilot.exception.NotFoundException;
@@ -44,6 +47,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -556,6 +560,7 @@ class DashboardControllersTest {
                 .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
 
         UUID operatorId = UUID.randomUUID();
+        UUID resolutionId = UUID.randomUUID();
         EscalationDetail answeredDetail = new EscalationDetail(
                 escalationId,
                 "req-123",
@@ -563,6 +568,7 @@ class DashboardControllersTest {
                 "How to get internet compensation?",
                 List.of(),
                 EscalationStatus.RESOLVED,
+                resolutionId,
                 "Submit the IT reimbursement form in the Finance portal.",
                 now.plusSeconds(60),
                 operatorId,
@@ -599,7 +605,8 @@ class DashboardControllersTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("RESOLVED"))
                 .andExpect(jsonPath("$.resolution_text").value("Submit the IT reimbursement form in the Finance portal."))
-                .andExpect(jsonPath("$.resolved_by_operator_id").value(operatorId.toString()));
+                .andExpect(jsonPath("$.resolved_by_operator_id").value(operatorId.toString()))
+                .andExpect(jsonPath("$.resolution_id").value(resolutionId.toString()));
 
         mockMvc.perform(put("/api/v1/dash/escalations/{id}/response", escalationId)
                         .header("Authorization", "Bearer " + logsOnlyJwt)
@@ -616,6 +623,93 @@ class DashboardControllersTest {
                         .content("""
                                 {"resolution_text": "   "}
                                 """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void escalationAnalyticsEnforcesPermissionBoundaries() throws Exception {
+        Instant from = Instant.parse("2026-11-18T00:00:00Z");
+        Instant to = Instant.parse("2026-11-21T00:00:00Z");
+
+        EscalationAnalyticsResponse payload = new EscalationAnalyticsResponse(
+                from,
+                to,
+                10L,
+                List.of(
+                        new EscalationStatusCount(EscalationStatus.PENDING, 4L),
+                        new EscalationStatusCount(EscalationStatus.RESOLVED, 6L)
+                ),
+                6L,
+                0.6,
+                5400000.0,
+                14400000.0,
+                List.of(new DailyEscalationPoint(LocalDate.of(2026, 11, 18), 4L, 2L))
+        );
+        when(escalationService.getAnalytics(from, to, ChatChannel.SLACK)).thenReturn(payload);
+
+        String analyticsJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "analyst@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.ANALYTICS)
+        ));
+        String escalationsJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "expert@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.ESCALATIONS)
+        ));
+        String promptsJwt = jwtService.generateAccessToken(new AccessTokenPayload(
+                "prompt@company.com",
+                DashboardOperatorStatus.ACTIVE,
+                List.of(DashboardOperatorAuthority.PROMPTS)
+        ));
+
+        // ANALYTICS authority receives aggregated metrics without any sensitive content
+        mockMvc.perform(get("/api/v1/dash/analytics/escalations")
+                        .header("Authorization", "Bearer " + analyticsJwt)
+                        .param("from", "2026-11-18T00:00:00Z")
+                        .param("to", "2026-11-21T00:00:00Z")
+                        .param("channel", "SLACK"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total_escalations").value(10))
+                .andExpect(jsonPath("$.status_counts[0].status").value("PENDING"))
+                .andExpect(jsonPath("$.resolved_count").value(6))
+                .andExpect(jsonPath("$.resolution_rate").value(0.6))
+                .andExpect(jsonPath("$.avg_resolution_time_ms").value(5400000.0))
+                .andExpect(jsonPath("$.p95_resolution_time_ms").value(14400000.0))
+                .andExpect(jsonPath("$.daily_trend[0].date").value("2026-11-18"))
+                .andExpect(jsonPath("$.question_text").doesNotExist())
+                .andExpect(jsonPath("$.resolution_text").doesNotExist())
+                .andExpect(jsonPath("$.requester_email").doesNotExist())
+                .andExpect(jsonPath("$.source_references").doesNotExist())
+                .andExpect(jsonPath("$.resolved_by_operator_id").doesNotExist());
+
+        // Permission boundary: ANALYTICS-only operator cannot read raw escalations or details
+        mockMvc.perform(get("/api/v1/dash/escalations")
+                        .header("Authorization", "Bearer " + analyticsJwt))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("FORBIDDEN"));
+
+        mockMvc.perform(get("/api/v1/dash/escalations/{id}", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + analyticsJwt))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("FORBIDDEN"));
+
+        // ESCALATIONS-only and PROMPTS-only operators cannot access global escalation analytics
+        mockMvc.perform(get("/api/v1/dash/analytics/escalations")
+                        .header("Authorization", "Bearer " + escalationsJwt))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("FORBIDDEN"));
+
+        mockMvc.perform(get("/api/v1/dash/analytics/escalations")
+                        .header("Authorization", "Bearer " + promptsJwt))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("FORBIDDEN"));
+
+        // Invalid channel returns 400 BAD_REQUEST
+        mockMvc.perform(get("/api/v1/dash/analytics/escalations")
+                        .header("Authorization", "Bearer " + analyticsJwt)
+                        .param("channel", "discord"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error_code").value("BAD_REQUEST"));
     }
