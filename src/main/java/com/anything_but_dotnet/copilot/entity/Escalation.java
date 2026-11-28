@@ -39,6 +39,9 @@ public class Escalation {
     @Column(nullable = false)
     private EscalationStatus status;
 
+    @Column(name = "resolution_id", unique = true)
+    private UUID resolutionId;
+
     @Column(name = "resolution_text", columnDefinition = "text")
     private String resolutionText;
 
@@ -105,8 +108,13 @@ public class Escalation {
         }
         this.status = targetStatus;
         this.updatedAt = now;
-        if (targetStatus.marksResolved() && this.resolvedAt == null) {
-            this.resolvedAt = now;
+        if (targetStatus.marksResolved()) {
+            if (this.resolvedAt == null) {
+                this.resolvedAt = now;
+            }
+            if (this.resolutionId == null) {
+                this.resolutionId = UUID.randomUUID();
+            }
         }
     }
 
@@ -124,6 +132,11 @@ public class Escalation {
         if (resolutionText == null || resolutionText.isBlank()) {
             throw new IllegalArgumentException("resolution_text must not be blank.");
         }
+        if (targetStatus != null && targetStatus != this.status && !this.status.canTransitionTo(targetStatus)) {
+            throw new IllegalArgumentException(
+                    "Invalid escalation status transition from " + this.status + " to " + targetStatus + "."
+            );
+        }
         this.resolutionText = resolutionText.trim();
         this.resolutionUpdatedAt = now;
         this.resolvedByOperatorId = operatorId;
@@ -139,6 +152,7 @@ public class Escalation {
     public String getQuestionText() { return questionText; }
     public String getSourceReferences() { return sourceReferences; }
     public EscalationStatus getStatus() { return status; }
+    public UUID getResolutionId() { return resolutionId; }
     public String getResolutionText() { return resolutionText; }
     public Instant getResolutionUpdatedAt() { return resolutionUpdatedAt; }
     public UUID getResolvedByOperatorId() { return resolvedByOperatorId; }

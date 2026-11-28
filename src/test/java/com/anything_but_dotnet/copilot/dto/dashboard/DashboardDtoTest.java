@@ -19,10 +19,14 @@ import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.Docume
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.OperatorItem;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.UpdateOperatorStatusRequest;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardResourceDto.UserAclItem;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.DailyEscalationPoint;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.EscalationAnalyticsResponse;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.EscalationStatusCount;
 import com.anything_but_dotnet.copilot.entity.DocumentMetadata;
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
 import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
 import com.anything_but_dotnet.copilot.entity.User;
+import com.anything_but_dotnet.copilot.entity.Escalation;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.DashboardErrorCode;
 import com.anything_but_dotnet.copilot.model.DashboardOperatorAuthority;
@@ -31,6 +35,7 @@ import com.anything_but_dotnet.copilot.model.ErrorCategory;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.QuestionOutcomeReasonCode;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
+import com.anything_but_dotnet.copilot.model.EscalationStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -109,6 +114,8 @@ class DashboardDtoTest {
                 null,
                 1.5,
                 100,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -246,5 +253,59 @@ class DashboardDtoTest {
         JsonNode errJson = objectMapper.readTree(objectMapper.writeValueAsString(err));
         assertEquals("FORBIDDEN", errJson.get("error_code").asText());
         assertEquals("2026-11-13T12:00:00Z", errJson.get("timestamp").asText());
+    }
+
+    @Test
+    void shouldSerializeEscalationAnalyticsAndResolutionLogMetadataWithoutSensitiveFields() throws Exception {
+        EscalationAnalyticsResponse response = new EscalationAnalyticsResponse(
+                Instant.parse("2026-11-18T00:00:00Z"),
+                Instant.parse("2026-11-21T00:00:00Z"),
+                10L,
+                List.of(
+                        new EscalationStatusCount(EscalationStatus.PENDING, 4L),
+                        new EscalationStatusCount(EscalationStatus.RESOLVED, 6L)
+                ),
+                6L,
+                0.6,
+                5400000.0,
+                14400000.0,
+                List.of(new DailyEscalationPoint(LocalDate.of(2026, 11, 18), 4L, 2L))
+        );
+
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(response));
+        assertEquals("2026-11-18T00:00:00Z", json.get("from").asText());
+        assertEquals("2026-11-21T00:00:00Z", json.get("to").asText());
+        assertEquals(10L, json.get("total_escalations").asLong());
+        assertEquals("PENDING", json.at("/status_counts/0/status").asText());
+        assertEquals(6L, json.get("resolved_count").asLong());
+        assertEquals(0.6, json.get("resolution_rate").asDouble());
+        assertEquals(5400000.0, json.get("avg_resolution_time_ms").asDouble());
+        assertEquals(14400000.0, json.get("p95_resolution_time_ms").asDouble());
+        assertEquals("2026-11-18", json.at("/daily_trend/0/date").asText());
+        assertEquals(2L, json.at("/daily_trend/0/resolved_count").asLong());
+        assertFalse(json.has("question_text"));
+        assertFalse(json.has("resolution_text"));
+        assertFalse(json.has("requester_email"));
+        assertFalse(json.has("source_references"));
+        assertFalse(json.has("resolved_by_operator_id"));
+
+        Instant created = Instant.parse("2026-11-23T10:00:00Z");
+        Instant resolved = Instant.parse("2026-11-23T11:00:00Z");
+        GenerationDiagnostics diag = GenerationDiagnostics.safeNoAnswer(
+                UUID.randomUUID(), "req-res-1", ChatChannel.TEAMS, QuestionOutcomeReasonCode.LOW_CONFIDENCE, 0.3, 900, null, created
+        );
+        diag.markEscalated(created);
+        Escalation esc = Escalation.createPending(
+                UUID.randomUUID(), "req-res-1", "oleh@company.com", "Confidential question", "[]", created
+        );
+        esc.recordResponse("Confidential answer", UUID.randomUUID(), EscalationStatus.RESOLVED, resolved);
+
+        JsonNode logJson = objectMapper.readTree(objectMapper.writeValueAsString(GenerationLogItem.from(diag, esc)));
+        assertEquals(esc.getId().toString(), logJson.get("escalation_id").asText());
+        assertEquals("RESOLVED", logJson.get("resolution_status").asText());
+        assertEquals(esc.getResolutionId().toString(), logJson.get("resolution_id").asText());
+        assertEquals("2026-11-23T11:00:00Z", logJson.get("resolved_at").asText());
+        assertFalse(logJson.has("question_text"));
+        assertFalse(logJson.has("resolution_text"));
     }
 }

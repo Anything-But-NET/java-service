@@ -53,7 +53,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/internal/auth/introspect").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/dash/logs/**").hasAuthority(DashboardOperatorAuthority.LOGS.getAuthority())
-                        .requestMatchers(HttpMethod.GET, "/api/v1/dash/analytics/outcomes").hasAuthority(DashboardOperatorAuthority.ANALYTICS.getAuthority())
+                        .requestMatchers(HttpMethod.GET, "/api/v1/dash/analytics/outcomes", "/api/v1/dash/analytics/escalations").hasAuthority(DashboardOperatorAuthority.ANALYTICS.getAuthority())
                         .requestMatchers(HttpMethod.GET, "/api/v1/dash/analytics/prompts/**").hasAuthority(DashboardOperatorAuthority.PROMPTS.getAuthority())
                         .requestMatchers(HttpMethod.GET, "/api/v1/dash/documents/**").hasAuthority(DashboardOperatorAuthority.METADATA.getAuthority())
                         .requestMatchers(HttpMethod.GET, "/api/v1/dash/users/**").hasAuthority(DashboardOperatorAuthority.USERS.getAuthority())

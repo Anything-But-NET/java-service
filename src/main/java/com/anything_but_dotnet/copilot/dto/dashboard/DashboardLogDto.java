@@ -1,14 +1,14 @@
 package com.anything_but_dotnet.copilot.dto.dashboard;
 
 import com.anything_but_dotnet.copilot.entity.DocumentSyncRun;
-import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
 import com.anything_but_dotnet.copilot.entity.Escalation;
+import com.anything_but_dotnet.copilot.entity.GenerationDiagnostics;
 import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.model.ErrorCategory;
+import com.anything_but_dotnet.copilot.model.EscalationStatus;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
 import com.anything_but_dotnet.copilot.model.QuestionOutcomeReasonCode;
 import com.anything_but_dotnet.copilot.model.SyncStatus;
-import com.anything_but_dotnet.copilot.model.EscalationStatus;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -99,6 +99,12 @@ public interface DashboardLogDto {
             @JsonProperty("resolution_status")
             EscalationStatus resolutionStatus,
 
+            @JsonProperty("resolution_id")
+            UUID resolutionId,
+
+            @JsonProperty("resolved_at")
+            Instant resolvedAt,
+
             @NotNull
             @JsonProperty("created_at")
             Instant createdAt,
@@ -109,6 +115,7 @@ public interface DashboardLogDto {
         public static GenerationLogItem from(GenerationDiagnostics diag) {
             return from(diag, null);
         }
+
         public static GenerationLogItem from(GenerationDiagnostics diag, Escalation escalation) {
             return new GenerationLogItem(
                     diag.getId(),
@@ -122,6 +129,8 @@ public interface DashboardLogDto {
                     diag.getPromptVersionId(),
                     escalation != null ? escalation.getId() : null,
                     escalation != null ? escalation.getStatus() : null,
+                    escalation != null ? escalation.getResolutionId() : null,
+                    escalation != null ? escalation.getResolvedAt() : null,
                     diag.getCreatedAt(),
                     diag.getUpdatedAt()
             );

@@ -5,6 +5,7 @@ import com.anything_but_dotnet.copilot.dto.EscalationResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardCommonDto.PageResponse;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationDetail;
 import com.anything_but_dotnet.copilot.dto.dashboard.DashboardEscalationDto.EscalationItem;
+import com.anything_but_dotnet.copilot.dto.dashboard.DashboardAnalyticsDto.EscalationAnalyticsResponse;
 import com.anything_but_dotnet.copilot.entity.DashboardOperator;
 import com.anything_but_dotnet.copilot.entity.Escalation;
 import com.anything_but_dotnet.copilot.entity.EscalationDraft;
@@ -14,6 +15,7 @@ import com.anything_but_dotnet.copilot.exception.EscalationDraftExpiredException
 import com.anything_but_dotnet.copilot.exception.NotFoundException;
 import com.anything_but_dotnet.copilot.model.EscalationStatus;
 import com.anything_but_dotnet.copilot.model.GenerationOutcome;
+import com.anything_but_dotnet.copilot.model.ChatChannel;
 import com.anything_but_dotnet.copilot.repository.DashboardOperatorRepository;
 import com.anything_but_dotnet.copilot.repository.EscalationDraftRepository;
 import com.anything_but_dotnet.copilot.repository.EscalationRepository;
@@ -300,6 +302,24 @@ public class EscalationService {
         List<EscalationStatusHistory> history = historyRepository.findByEscalationIdOrderByChangedAtAsc(id);
         List<Citation> sourceReferences = deserializeSourceReferences(escalation.getSourceReferences());
         return EscalationDetail.from(escalation, diag, sourceReferences, history);
+    }
+
+    @Transactional(readOnly = true)
+    public EscalationAnalyticsResponse getAnalytics(Instant from, Instant to, ChatChannel channel) {
+        if (from != null && to != null && from.isAfter(to)) {
+            throw new IllegalArgumentException("Query parameter 'from' must not be after 'to'.");
+        }
+        String channelFilter = channel != null ? channel.name() : null;
+        String json = escalationRepository.getAnalyticsJson(from, to, channelFilter);
+        if (json == null || json.isBlank()) {
+            return EscalationAnalyticsResponse.empty(from, to);
+        }
+        try {
+            return objectMapper.readValue(json, EscalationAnalyticsResponse.class)
+                    .withTimeRange(from, to);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to deserialize escalation analytics aggregation JSON.", e);
+        }
     }
 
     private UUID resolveOperatorId(String operatorEmail) {

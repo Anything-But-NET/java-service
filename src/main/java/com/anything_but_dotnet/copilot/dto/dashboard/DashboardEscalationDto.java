@@ -42,6 +42,9 @@ public interface DashboardEscalationDto {
             @JsonProperty("status")
             EscalationStatus status,
 
+            @JsonProperty("resolution_id")
+            UUID resolutionId,
+
             @JsonProperty("resolution_text")
             String resolutionText,
 
@@ -71,23 +74,6 @@ public interface DashboardEscalationDto {
             @JsonProperty("resolved_at")
             Instant resolvedAt
     ) {
-        public EscalationItem(
-                UUID id,
-                String queryId,
-                String requesterEmail,
-                String questionText,
-                EscalationStatus status,
-                ChatChannel channel,
-                QuestionOutcomeReasonCode reasonCode,
-                Double confidenceScore,
-                Instant createdAt,
-                Instant updatedAt,
-                Instant resolvedAt
-        ) {
-            this(id, queryId, requesterEmail, questionText, status, null, null, null,
-                    channel, reasonCode, confidenceScore, createdAt, updatedAt, resolvedAt);
-        }
-
         public static EscalationItem from(Escalation escalation, GenerationDiagnostics diag) {
             return new EscalationItem(
                     escalation.getId(),
@@ -95,6 +81,7 @@ public interface DashboardEscalationDto {
                     escalation.getRequesterEmail(),
                     escalation.getQuestionText(),
                     escalation.getStatus(),
+                    escalation.getResolutionId(),
                     escalation.getResolutionText(),
                     escalation.getResolutionUpdatedAt(),
                     escalation.getResolvedByOperatorId(),
@@ -163,6 +150,9 @@ public interface DashboardEscalationDto {
             @JsonProperty("status")
             EscalationStatus status,
 
+            @JsonProperty("resolution_id")
+            UUID resolutionId,
+
             @JsonProperty("resolution_text")
             String resolutionText,
 
@@ -196,25 +186,6 @@ public interface DashboardEscalationDto {
             @JsonProperty("status_history")
             List<EscalationStatusHistoryItem> statusHistory
     ) {
-        public EscalationDetail(
-                UUID id,
-                String queryId,
-                String requesterEmail,
-                String questionText,
-                List<Citation> sourceReferences,
-                EscalationStatus status,
-                ChatChannel channel,
-                QuestionOutcomeReasonCode reasonCode,
-                Double confidenceScore,
-                Instant createdAt,
-                Instant updatedAt,
-                Instant resolvedAt,
-                List<EscalationStatusHistoryItem> statusHistory
-        ) {
-            this(id, queryId, requesterEmail, questionText, sourceReferences, status, null, null, null,
-                    channel, reasonCode, confidenceScore, createdAt, updatedAt, resolvedAt, statusHistory);
-        }
-
         public static EscalationDetail from(
                 Escalation escalation,
                 GenerationDiagnostics diag,
@@ -228,6 +199,7 @@ public interface DashboardEscalationDto {
                     escalation.getQuestionText(),
                     sourceReferences != null ? sourceReferences : List.of(),
                     escalation.getStatus(),
+                    escalation.getResolutionId(),
                     escalation.getResolutionText(),
                     escalation.getResolutionUpdatedAt(),
                     escalation.getResolvedByOperatorId(),
